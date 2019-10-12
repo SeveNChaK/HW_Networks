@@ -124,7 +124,7 @@ int main( int argc, char** argv) {
 Входные значения:
 	int *serverSocket - ссылка на переменную сокета сервера
 	int port - порт, на котором сервер будет слушать запрос на соединение	
-**/
+*/
 void initServerSocket(int *serverSocket, int port){
     struct sockaddr_in listenerInfo;
 	listenerInfo.sin_family = AF_INET;
@@ -158,7 +158,7 @@ void initServerSocket(int *serverSocket, int port){
 		В данном случае сюда приходит int *serverSocket - сокет-дескриптор сервера.
 Возвращаемое значение:
 	void* - так надо, чтоб вызывать функцию при создании потока.
-**/
+*/
 void* listenerConnetions(void* args){
     int serverSocket = *((int*) args);
     
@@ -213,7 +213,7 @@ void* listenerConnetions(void* args){
 
 /**
 Функция отключает всех клиентов.
-**/
+*/
 void kickAllClients(){
 	//TODO проверяем запись, ставим чтение
 		pthread_mutex_lock(&mutex);
@@ -232,7 +232,7 @@ void kickAllClients(){
 Функция отключает клиента.
 Входные значения:
 	int kickNum - номер отключаемого клиента
-**/
+*/
 void kickClient(int kickNum){
 	//TODO проверяем чтение, ставим запись
 		pthread_mutex_lock(&mutex);
@@ -252,7 +252,7 @@ void kickClient(int kickNum){
 		В данном случае сюда приходит int *indexClient - номер клиента.
 Возвращаемое значение:
 	void* - так надо, чтоб вызывать функцию при создании потока.
-**/
+*/
 void* clientHandler(void* args){
 	int indexClient = *((int*)args);
 	//TODO проверяем запись, стави чтение
@@ -289,7 +289,7 @@ void* clientHandler(void* args){
 	int socket - сокет-дескриптор, из которого читается сообщение.
 Возвращаемое значение:
 	Количество считанных байт или -1 если не удалось считать сообщение.
-**/
+*/
 int readMessage(int socket){
 	int resultBytes = 0;
 	int result;
@@ -315,7 +315,7 @@ int readMessage(int socket){
 	char *cmdLine - строка, в которую будет записана команда.
 Возвращаемое значение:
 	Количество прочитанных байт или -1 если не удалось считать команду.
-**/
+*/
 int readCommand(int socket, char *cmdLine){
 	int size;
 	if(readN(socket, &size, sizeof(size)) < 0){
@@ -335,7 +335,7 @@ int readCommand(int socket, char *cmdLine){
 Исполняет полученную команду, внутри себя вызывает функции проверки корретности команд.
 Входные значения:
 	char *cmd - строка, которая содержит команду.
-**/
+*/
 void execCommand(char *cmd){
 
 }
@@ -354,7 +354,7 @@ int readFile(int socket){
 	int length - количество байт, которое необходимо считать
 Возвращаемое значение:
 	Количество считанных байт или -1 если не удалось считать данные.
-**/
+*/
 int readN(int socket, char* buf, int length){
 	int result = 0;
 	int readedBytes = 0;
