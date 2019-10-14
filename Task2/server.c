@@ -8,7 +8,17 @@
 #include <pthread.h>
 #include <string.h>
 
-#define SIZE_MSG 100
+/**
+4096 - максимальная длина ппути в линукс
+255 - максимальная длина файла в линукс
+1 - символ конца строки
+(но это все не точно)
+Сообщением такой длины будет отправляться команда. Такими же пачками будем отправлять и файл.
+*/
+#define SIZE_MSG 4096 + 255 + 1
+#define MAX_ARG_IN_CMD 2
+#define MAX_ARG_SIZE 4097
+#define DEFAULT_SIZE_STRING 100
 
 /*
 TODO
@@ -20,6 +30,11 @@ TODO
 */
 
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+
+struct Command {
+	int argc;
+	char [MAX_ARG_IN_CMD][MAX_ARG_SIZE];
+}
 
 struct Client {
     pthread_t threadId;
@@ -36,11 +51,10 @@ void* listenerConnetions(void* args);
 void kickAllClients();
 void kickClient(int kickNum);
 void* clientHandler(void* args);
-int readMessage(int socket);
 int readCommand(int socket, char *cmdLine);
 int readFile(int socket);
 int readN(int socket, char* buf, int length);
-void execCommand(char *cmd);
+void execClientCommand(char *cmd);
 
 
 int main( int argc, char** argv) {
@@ -122,8 +136,8 @@ int main( int argc, char** argv) {
 Инициализация TCP сокета. Если произойдет какая-то ошибка, то программа будет
 завершена вызовом функции exit().
 Входные значения:
-	int *serverSocket - ссылка на переменную сокета сервера
-	int port - порт, на котором сервер будет слушать запрос на соединение	
+	int *serverSocket - ссылка на переменную сокета сервера;
+	int port - порт, на котором сервер будет слушать запрос на соединение.
 */
 void initServerSocket(int *serverSocket, int port){
     struct sockaddr_in listenerInfo;
@@ -263,83 +277,120 @@ void* clientHandler(void* args){
 		pthread_mutex_unlock(&mutex);
 	//----
 
-	//TODO сделать динамическую память для каждого сообщения
-		char msg[SIZE_MSG] = {0};
-	//--
+	char cmdLine[SIZE_MSG];
 	fprintf(stdout, "Соединение с клиентом №%d установлено.\n", indexClient);
 	for(;;) {
-		if(readMessage(clientSocket) < 0){
+		bzero(cmdLine, SIZE_MSG);
+		if(readCommand(clientSocket) < 0){
 			kickClient(indexClient);
 			break;
 		} else {
-			fprintf(stdout, "Получил сообщение от клиента №%d.\n", indexClient);
-			//TODO отправить клиенту какое-нибудь подтверждение о получении
+			fprintf(stdout, "Получил команду от клиента №%d: %s\n", indexClient, cmdLine);
+			execClientCommand(cmdLine);
+			//TODO возможно стоит отправить подтверждение
 		}
-		memset(msg, 0, sizeof(msg));
 	}
 
 	fprintf(stdout, "Клиент №%d завершил своб работу.\n", indexClient);
 }
 
 /**
-Функция читает сообщение из сокета-дескриптора. Поток будет заблокирован 
-на этой функции, пока не будет считано сообщение или пока не произойдет
+Функция читает команду из сокета-дескриптора. Поток будет заблокирован 
+на этой функции, пока не будет считана команда или пока не произойдет
 закрытие сокета.
 Входные значения:
-	int socket - сокет-дескриптор, из которого читается сообщение.
+	int socket - сокет-дескриптор, из которого читается сообщение;
+	char *cmdLine - ссыдка на тсроку, в которую будет записана команда.
 Возвращаемое значение:
-	Количество считанных байт или -1 если не удалось считать сообщение.
-*/
-int readMessage(int socket){
-	int resultBytes = 0;
-	int result;
-	char *cmdLine;
-	result = readCommand(socket, cmdLine);
-	if(result < 0){
-		fprintf(stderr, "%s\n", "Ошибка в чтении команды!");
-		return -1;
-	}
-	resultBytes += result;
-	execCommand(cmdLine);
-
-
-
-	sleep(5);
-	return 1;
-}
-
-/**
-Читает команду из сокета.
-Входные значения:
-	int socket - сокет-дескриптор, из которого читается команда.
-	char *cmdLine - строка, в которую будет записана команда.
-Возвращаемое значение:
-	Количество прочитанных байт или -1 если не удалось считать команду.
+	Количество считанных байт или -1 если не удалось считать команду.
 */
 int readCommand(int socket, char *cmdLine){
-	int size;
-	if(readN(socket, &size, sizeof(size)) < 0){
-		fprintf(stderr, "%s\n", "Не удалось считать длину команды!");
-		return -1;
-	}
-	char msg[size]; //TODO ВОПРОС, не очиститься ли память, после окончания функции
-	if(readN(socket, msg, size) < 0 ){
+	int result = readN(socket, cmdLine, SIZE_MSG);
+	if(result < 0 ){
 		fprintf(stderr, "%s\n", "Не удалось считать команду!");
 		return -1;
 	}
-	cmdLine = msg;
-	return size;
+	fprintf(stdout, "Получена команда от клиента: %s\n", cmdLine);
+	return result;
 }
 
 /**
 Исполняет полученную команду, внутри себя вызывает функции проверки корретности команд.
+Обрабатываемые команды от клиентов:
+	ls - отправляет пользоватлею список файлов в директории;
+	cd [DIR] - навигация по директориям;
+	load [FILE_NAME] - загружает файл на сервер;
+	get [FILE_NAME] - отправляет файл пользователю.
 Входные значения:
-	char *cmd - строка, которая содержит команду.
+	char *cmdLine - строка, которая содержит команду.
 */
-void execCommand(char *cmd){
+void execClientCommand(char *cmdLine){
+	struct Command cmd;
+	if(validateCommand(cmdLine, &cmd) == -1){
+		return;
+	}
+	fprintf(stdout, "Полученная команда корректна: %s\n", firstArgc);
+	switch(cmd.argc[0]){
+		case "ls":
+			
+			break;
+		case "cd":
+			
+			break;
+		case "load":
+
+			break;
+		case "get":
+
+			break;
+		default:
+			fprintf(stderr, "Что-то пошло не так с командой: %s - никак не распознается, хотя считается корретной!\n", cmdLine);
+			break;
+	}
+}
+
+/**
+Исполняет полученную команду, внутри себя вызывает функции проверки корретности команд.
+Обрабатываемые собственные команды:
+	/kick [NUMBER] - принудительно отключает клиента;
+	/shutdown - завершает работу сервера.
+Входные значения:
+	char *cmdLine - строка, которая содержит команду.
+Возвращаемое значение:
+	1 если команда не влияет на работу сервера или -1 если пора завершать работу.
+*/
+int execServerCommand(char *cmdLine){
+	struct Command cmd;
+	if(validateCommand(cmdLine, &cmd) == -1){
+		return;
+	}
+	fprintf(stdout, "Полученная команда корректна: %s\n", firstArgc);
+	switch(cmd.argc[0]){
+		case "/kick":
+			kickClient(atoi(cmd.argc[1]));
+			break;
+		case "/shutdown":
+			return -1;
+			break;
+	}
+	return 1;
+}
+
+/**
+Проверка корректности команды. Функция сама выводит ошибки.
+Входные значения:
+	char *cmd - ссылка на строку, которая содержит команду;
+	char *firstArgc - ссылка на строку, куда будет записан первый аргумент команды (сама команда) или NULL.
+Возвращаемое значение:
+	1 если все хорошо или -1 если команда неккоретна или не существует.
+*/
+int validateCommand(char *cmdLine, struct Command *cmd){
 
 }
 
+/**
+Получает файл от клиента.
+*/
 int readFile(int socket){
 
 }
@@ -347,7 +398,7 @@ int readFile(int socket){
 /**
 Функиця читает N байт из сокета. Поток будет заблокирован на этой функции, 
 пока не будет считано заданное количество байт или пока не произойдет
-закрытие сокета.
+закрытие сокета. В конце всегда стоит символ конца строки.
 Входные значения:
 	int socket - сокет-дескриптор, из которого будут считаны данные
 	char *buf - строка, куда будут считаны данные
@@ -367,5 +418,6 @@ int readN(int socket, char* buf, int length){
 		result += readedBytes;
 		sizeMsg -= readedBytes;
 	}
+	buf[strlen(buf) - 1] = '\0';
 	return result;
 }
