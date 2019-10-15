@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <pthread.h>
 #include <string.h>
+#include <regex.h>
 
 /**
 4096 - максимальная длина ппути в линукс
@@ -19,6 +20,7 @@
 #define MAX_ARG_IN_CMD 2
 #define MAX_ARG_SIZE 4097
 #define DEFAULT_SIZE_STRING 100
+#define SIZE_ERR_STRING 300
 
 /*
 TODO
@@ -33,8 +35,8 @@ pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 
 struct Command {
 	int argc;
-	char [MAX_ARG_IN_CMD][MAX_ARG_SIZE];
-}
+	char argv[MAX_ARG_IN_CMD][MAX_ARG_SIZE];
+};
 
 struct Client {
     pthread_t threadId;
@@ -54,7 +56,9 @@ void* clientHandler(void* args);
 int readCommand(int socket, char *cmdLine);
 int readFile(int socket);
 int readN(int socket, char* buf, int length);
-void execClientCommand(char *cmd);
+void execClientCommand(char *cmdLine);
+int execServerCommand(char *cmdLine);
+int validateCommand(char *cmdLine, struct Command *cmd);
 
 
 int main( int argc, char** argv) {
@@ -278,15 +282,23 @@ void* clientHandler(void* args){
 	//----
 
 	char cmdLine[SIZE_MSG];
+	char errorString[SIZE_MSG];
 	fprintf(stdout, "Соединение с клиентом №%d установлено.\n", indexClient);
 	for(;;) {
-		bzero(cmdLine, SIZE_MSG);
-		if(readCommand(clientSocket) < 0){
+		bzero(cmdLine, sizeof(cmdLine));
+		bzero(errorString, sizeof(errorString));
+		if(readCommand(clientSocket, cmdLine) < 0){
 			kickClient(indexClient);
 			break;
 		} else {
 			fprintf(stdout, "Получил команду от клиента №%d: %s\n", indexClient, cmdLine);
-			execClientCommand(cmdLine);
+			int err = execClientCommand(cmdLine, errorString);
+			if(err == -1){
+				send(clientSocket, errorString, sizeof(errorString), 0);
+				continue;
+			} else {
+				send(clientSocket, "Все ОК.", SIZE_MSG, 0);
+			}
 			//TODO возможно стоит отправить подтверждение
 		}
 	}
@@ -322,31 +334,32 @@ int readCommand(int socket, char *cmdLine){
 	load [FILE_NAME] - загружает файл на сервер;
 	get [FILE_NAME] - отправляет файл пользователю.
 Входные значения:
-	char *cmdLine - строка, которая содержит команду.
+	char *cmdLine - строка, которая содержит команду;
+	char *errorString - строка, которая будет содержать сообщение ошибки.
+Возвращаемое значение:
+	1 если все хорошо или -1 если возникли какие-то проблемы, описание проблемы
+	содержиться в переменной errorString.
 */
-void execClientCommand(char *cmdLine){
+int execClientCommand(char *cmdLine, char *errorString){
 	struct Command cmd;
-	if(validateCommand(cmdLine, &cmd) == -1){
-		return;
+	bzero(errorString, sizeof(errorString));
+	if(validateCommand(cmdLine, &cmd, errorString) == -1){
+		return -1;
 	}
-	fprintf(stdout, "Полученная команда корректна: %s\n", firstArgc);
-	switch(cmd.argc[0]){
-		case "ls":
-			
-			break;
-		case "cd":
-			
-			break;
-		case "load":
-
-			break;
-		case "get":
-
-			break;
-		default:
-			fprintf(stderr, "Что-то пошло не так с командой: %s - никак не распознается, хотя считается корретной!\n", cmdLine);
-			break;
+	fprintf(stdout, "Полученная команда: %s - корректна.\n", cmdLine);
+	if(!strcmp(cmd.argv[0], "ls")) {
+		//TODO
+	} else if(!strcmp(cmd.argv[0], "cd")) {
+		//TODO
+	} else if(!strcmp(cmd.argv[0], "load")) {
+		//TODO
+	} else if(!strcmp(cmd.argv[0], "get")){
+		//TODO
+	} else {
+		sprintf(stderr, "Хоть мы все ипроверили, но что-то с ней не так: %s\n", cmdLine);
+		return -1;
 	}
+	return 1;
 }
 
 /**
@@ -355,37 +368,109 @@ void execClientCommand(char *cmdLine){
 	/kick [NUMBER] - принудительно отключает клиента;
 	/shutdown - завершает работу сервера.
 Входные значения:
-	char *cmdLine - строка, которая содержит команду.
+	char *cmdLine - строка, которая содержит команду;
+	char *errorString - строка, которая будет содержать сообщение ошибки.
 Возвращаемое значение:
-	1 если команда не влияет на работу сервера или -1 если пора завершать работу.
+	1 если команда не влияет на работу сервера, 0 если пора завершать работу
+	или -1 если произошла какая-то ошибка. Описание ошибки содержится в
+	переменной errorString.
 */
-int execServerCommand(char *cmdLine){
+int execServerCommand(char *cmdLine, char *errorString){
 	struct Command cmd;
-	if(validateCommand(cmdLine, &cmd) == -1){
-		return;
-	}
-	fprintf(stdout, "Полученная команда корректна: %s\n", firstArgc);
-	switch(cmd.argc[0]){
-		case "/kick":
-			kickClient(atoi(cmd.argc[1]));
-			break;
-		case "/shutdown":
+	bzero(errorString, sizeof(errorString));
+	if(validateCommand(cmdLine, &cmd, errorString) != -1){
+		fprintf(stdout, "Полученная команда: %s - корретна.\n", cmdLine);
+		if(!strcmp(cmd.argv[0], "/kick")){
+			kickClient(atoi(cmd.argv[1]));
+		} else if(!strcmp(cmd.argv[0], "/shutdown")){
+			return 0;
+		} else {
+			sprintf(errorString, "Хоть мы все ипроверили, но что-то с командой не так: %s\n", cmdLine);
 			return -1;
-			break;
+		}
+	} else {
+		return -1;
 	}
 	return 1;
 }
 
 /**
-Проверка корректности команды. Функция сама выводит ошибки.
+Проверка корректности команды. Заполняет структуру Command.
 Входные значения:
-	char *cmd - ссылка на строку, которая содержит команду;
-	char *firstArgc - ссылка на строку, куда будет записан первый аргумент команды (сама команда) или NULL.
+	char *cmdLine - ссылка на строку, которая содержит команду;
+	char *cmd - ссылка на структуру, которая описывает команду;
+	char *errorString - строка, которая будет содержать сообщение ошибки.
 Возвращаемое значение:
-	1 если все хорошо или -1 если команда неккоретна или не существует.
+	1 если все хорошо или -1 если команда неккоретна или не существует. Описание
+	ошибки содержится в переменной errorString.
 */
-int validateCommand(char *cmdLine, struct Command *cmd){
-
+int validateCommand(char *cmdLine, struct Command *cmd, char *errorString){
+	char *sep = " ";
+	char *firstArg = strtok(sep, cmdLine);
+	if(firstArg != NULL){
+		strcpy(cmd->argv[0], firstArg);
+		strcpy(cmd->argv[1], strtok(sep, cmdLine));
+		if(cmd->argv[1] == NULL){
+			cmd->argc = 1;
+		} else {
+			cmd->argc = 2;
+		}
+		if(!strcmp(firstArg, "ls")){
+			if(cmd->argc != 1){
+				sprintf(errorString, "Лишний аргумент ( %s ). Используйте: ls\n", cmd->argv[1]);
+				return -1;
+			}
+		} else if(!strcmp(firstArg, "cd")){
+			if(cmd->argc != 2){
+				//TODO отправлять ошибку клиенту
+				sprintf(errorString, "В команде: %s - не хватает аргумента. Используйте: cd [DIR]\n", cmdLine);
+				return -1;
+			}
+		} else if(!strcmp(firstArg, "load")){
+			if(cmd->argc != 2){
+				//TODO отправлять ошибку клиенту
+				sprintf(errorString, "В команде: %s - не хватает аргумента. Используйте: load [FILE_NAME]\n", cmdLine);
+				return -1;
+			}
+		} else if(!strcmp(firstArg, "get")){
+			if(cmd->argc != 2){
+				//TODO отправлять ошибку клиенту
+				sprintf(errorString, "В команде: %s - не хватает аргумента. Используйте: get [FILE_NAME]\n", cmdLine);
+				return -1;
+			}
+		} else if(!strcmp(firstArg, "/kick")){
+			if(cmd->argc != 2){
+				sprintf(errorString, "В команде: %s - не хватает аргумента. Используйте: /kick [CLIENT_NUMBER]\n", cmdLine);
+				return -1;
+			}
+			char *pattern = "^\\d+$";
+			regex_t preg;
+    		int err,regerr;
+    		err = regcomp (&preg, pattern, REG_EXTENDED);
+    		if(err != 0){
+    			sprintf(errorString, "Не получилось скомпилировать регулярное выражение: %s\n", pattern);
+    			return -1;
+    		}
+    		regmatch_t pm;
+    		regerr = regexec (&preg, cmd->argv[1], 0, &pm, 0);
+    		if(regerr != 0){
+    			sprintf(errorString, "Аргумент ( %s ) в команде: %s - неккоретен!\n", cmd->argv[1], cmdLine);
+    			return -1;
+    		}
+		} else if(!strcmp(firstArg, "/shutdown")){
+			if(cmd->argc != 1){
+				sprintf(errorString, "Лишний аргумент ( %s ). Используйте: /shutdown\n", cmd->argv[1]);
+				return -1;
+			}
+		} else {
+			sprintf(errorString, "Неизвестный первый аргумент ( %s ) команды: %s\n", cmd->argv[0], cmdLine);
+			return -1;
+		}
+	} else {
+		sprintf(errorString, "С командой: %s - все плохо!\n", cmdLine);
+		return -1;
+	}
+	return 1;
 }
 
 /**
