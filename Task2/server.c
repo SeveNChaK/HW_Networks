@@ -9,18 +9,8 @@
 #include <string.h>
 #include <regex.h>
 
-/**
-4096 - максимальная длина ппути в линукс
-255 - максимальная длина файла в линукс
-1 - символ конца строки
-(но это все не точно)
-Сообщением такой длины будет отправляться команда. Такими же пачками будем отправлять и файл.
-*/
-#define SIZE_MSG 4096 + 255 + 1
-#define MAX_ARG_IN_CMD 2
-#define MAX_ARG_SIZE 4097
-#define DEFAULT_SIZE_STRING 100
-#define SIZE_ERR_STRING 300
+#include "declaration.h"
+#include "dexchange.h"
 
 /*
 TODO
@@ -36,6 +26,7 @@ pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 struct Command {
 	int argc;
 	char argv[MAX_ARG_IN_CMD][MAX_ARG_SIZE];
+	char sourceCmdLine[SIZE_MSG];
 };
 
 struct Client {
@@ -53,12 +44,11 @@ void* listenerConnetions(void* args);
 void kickAllClients();
 void kickClient(int kickNum);
 void* clientHandler(void* args);
-int readCommand(int socket, char *cmdLine);
 int readFile(int socket);
-int readN(int socket, char* buf, int length);
-void execClientCommand(char *cmdLine);
-int execServerCommand(char *cmdLine);
-int validateCommand(char *cmdLine, struct Command *cmd);
+int execClientCommand(int clientSocket, char *cmdLine, char *errorString);
+int execServerCommand(char *cmdLine, char *errorString);
+int parseCmd(char *cmdLine, struct Command *cmd, char *errorString);
+int validateCommand(struct Command cmd, char *errorString);
 
 
 int main( int argc, char** argv) {
@@ -154,7 +144,12 @@ void initServerSocket(int *serverSocket, int port){
 		fprintf(stderr, "%s\n", "Не удалось создать сокет!");
 		exit(1);
 	}
-	
+
+	int enable = 1;
+	if (setsockopt(serverSocket, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(int)) < 0){
+    	fprintf(stderr, "%s\n", "setsockopt(SO_REUSEADDR) failed!");
+	}
+
 	int resBind = bind(*serverSocket, (struct sockaddr *)&listenerInfo, sizeof(listenerInfo));
 	if (resBind < 0 ) {
 		fprintf(stderr, "%s\n", "Не удалось выполнить присваивание имени сокету!");
@@ -281,49 +276,31 @@ void* clientHandler(void* args){
 		pthread_mutex_unlock(&mutex);
 	//----
 
-	char cmdLine[SIZE_MSG];
-	char errorString[SIZE_MSG];
 	fprintf(stdout, "Соединение с клиентом №%d установлено.\n", indexClient);
+
+	struct Package package;
+	char errorString[SIZE_MSG];
 	for(;;) {
-		bzero(cmdLine, sizeof(cmdLine));
 		bzero(errorString, sizeof(errorString));
-		if(readCommand(clientSocket, cmdLine) < 0){
+		if(readPack(clientSocket, &package) < 0){
 			kickClient(indexClient);
 			break;
 		} else {
-			fprintf(stdout, "Получил команду от клиента №%d: %s\n", indexClient, cmdLine);
-			int err = execClientCommand(cmdLine, errorString);
-			if(err == -1){
-				send(clientSocket, errorString, sizeof(errorString), 0);
-				continue;
+			if(package.code == CODE_CMD){
+				int err = execClientCommand(clientSocket, package.data, errorString);
+				if(err == -1){
+					sendPack(clientSocket, CODE_ERROR, errorString);
+				}
 			} else {
-				send(clientSocket, "Все ОК.", SIZE_MSG, 0);
+				fprintf(stderr, "Ожидался пакет с кодом - %d, получили пакет с кодом - %d\n", CODE_CMD, package.code);
+				sprintf(errorString, "%s\n", "Ожидалась команда!");
+				sendPack(clientSocket, CODE_ERROR, errorString);
 			}
-			//TODO возможно стоит отправить подтверждение
+			sendPack(clientSocket, CODE_OK, "Команда обработана.");
 		}
 	}
 
 	fprintf(stdout, "Клиент №%d завершил своб работу.\n", indexClient);
-}
-
-/**
-Функция читает команду из сокета-дескриптора. Поток будет заблокирован 
-на этой функции, пока не будет считана команда или пока не произойдет
-закрытие сокета.
-Входные значения:
-	int socket - сокет-дескриптор, из которого читается сообщение;
-	char *cmdLine - ссыдка на тсроку, в которую будет записана команда.
-Возвращаемое значение:
-	Количество считанных байт или -1 если не удалось считать команду.
-*/
-int readCommand(int socket, char *cmdLine){
-	int result = readN(socket, cmdLine, SIZE_MSG);
-	if(result < 0 ){
-		fprintf(stderr, "%s\n", "Не удалось считать команду!");
-		return -1;
-	}
-	fprintf(stdout, "Получена команда от клиента: %s\n", cmdLine);
-	return result;
 }
 
 /**
@@ -334,27 +311,36 @@ int readCommand(int socket, char *cmdLine){
 	load [FILE_NAME] - загружает файл на сервер;
 	get [FILE_NAME] - отправляет файл пользователю.
 Входные значения:
+	int clientSocket - сокет-дескриптор клиента;
 	char *cmdLine - строка, которая содержит команду;
-	char *errorString - строка, которая будет содержать сообщение ошибки.
+	char *errorString - строка, которая будет содержать описание ошибки.
 Возвращаемое значение:
-	1 если все хорошо или -1 если возникли какие-то проблемы, описание проблемы
-	содержиться в переменной errorString.
+	1 - команда выполнена или -1 елси возникла ошибка. Описание проблемы содержиться в переменной errorString.
 */
-int execClientCommand(char *cmdLine, char *errorString){
-	struct Command cmd;
+int execClientCommand(int clientSocket, char *cmdLine, char *errorString){
 	bzero(errorString, sizeof(errorString));
-	if(validateCommand(cmdLine, &cmd, errorString) == -1){
+	struct Command cmd;
+	if(parseCmd(cmdLine, &cmd, errorString) == -1){
+		fprintf(stderr, "Не удалось распарсить команду клиента: %s\nОписание ошибки: %s\n", cmdLine, errorString);
 		return -1;
 	}
-	fprintf(stdout, "Полученная команда: %s - корректна.\n", cmdLine);
+	if(validateCommand(cmd, errorString) == -1){
+		fprintf(stderr, "Команда клиента: %s - неккоретна!\nОписание ошибки: %s\n", cmdLine, errorString);
+		return -1;
+	}
+	fprintf(stdout, "Команда клиента: %s - корректна.\n", cmdLine);
 	if(!strcmp(cmd.argv[0], "ls")) {
-		//TODO
+		sprintf(errorString, "В разработке... Команда: %s\n", cmdLine);
+		return -1;
 	} else if(!strcmp(cmd.argv[0], "cd")) {
-		//TODO
+		sprintf(errorString, "В разработке... Команда: %s\n", cmdLine);
+		return -1;
 	} else if(!strcmp(cmd.argv[0], "load")) {
-		//TODO
+		sprintf(errorString, "В разработке... Команда: %s\n", cmdLine);
+		return -1;
 	} else if(!strcmp(cmd.argv[0], "get")){
-		//TODO
+		sprintf(errorString, "В разработке... Команда: %s\n", cmdLine);
+		return -1;
 	} else {
 		sprintf(stderr, "Хоть мы все ипроверили, но что-то с ней не так: %s\n", cmdLine);
 		return -1;
@@ -376,98 +362,122 @@ int execClientCommand(char *cmdLine, char *errorString){
 	переменной errorString.
 */
 int execServerCommand(char *cmdLine, char *errorString){
-	struct Command cmd;
 	bzero(errorString, sizeof(errorString));
-	if(validateCommand(cmdLine, &cmd, errorString) != -1){
-		fprintf(stdout, "Полученная команда: %s - корретна.\n", cmdLine);
-		if(!strcmp(cmd.argv[0], "/kick")){
-			kickClient(atoi(cmd.argv[1]));
-		} else if(!strcmp(cmd.argv[0], "/shutdown")){
-			return 0;
-		} else {
-			sprintf(errorString, "Хоть мы все ипроверили, но что-то с командой не так: %s\n", cmdLine);
-			return -1;
-		}
+	struct Command cmd;
+	if(parseCmd(cmdLine, &cmd, errorString) == -1){
+		fprintf(stderr, "Не удалось распарсить команду сервера: %s\nОписание ошибки: %s\n", cmdLine, errorString);
+		return -1;
+	}
+	if(validateCommand(cmd, errorString) == -1){
+		fprintf(stderr, "Команда сервера: %s - неккоретна!\nОписание ошибки: %s\n", cmdLine, errorString);
+		return -1;
+	}
+	fprintf(stdout, "Команда сервера: %s - корректна.\n", cmdLine);
+	if(!strcmp(cmd.argv[0], "/kick")){
+		kickClient(atoi(cmd.argv[1]));
+	} else if(!strcmp(cmd.argv[0], "/shutdown")){
+		return 0;
 	} else {
+		sprintf(errorString, "Хоть мы все ипроверили, но что-то с командой не так: %s\n", cmdLine);
 		return -1;
 	}
 	return 1;
 }
 
 /**
-Проверка корректности команды. Заполняет структуру Command.
+Функция парсит входную строку, на аргументы.
 Входные значения:
-	char *cmdLine - ссылка на строку, которая содержит команду;
-	char *cmd - ссылка на структуру, которая описывает команду;
+	char *cmdLine - исходная строка, которая содержит команду;
+	struct Command *cmd - ссылка на структуру, в которую будет записана информация о команде;
+	char *errorString - строка, которая будет соодежать сообщение об ошибке.
+Возвращаемое значение:
+	1 - если все хорошо или -1 если произошла ошибка. Описание ошибки содержится в переменной 
+	errorString.
+*/
+int parseCmd(char *cmdLine, struct Command *cmd, char *errorString){
+	bzero(errorString, sizeof(errorString));
+	int countArg = 0;
+	char *sep = " ";
+	char *arg = strtok(sep, cmdLine);
+	if(arg == NULL){
+		sprintf(errorString, "Команда: %s - не поддается парсингу.\nВведите корректную команду. Используйте: help\n", cmdLine);
+		return -1;
+	}
+	while(arg != NULL && countArg <= MAX_ARG_IN_CMD){
+		countArg ++;
+		strcpy(cmd->argv[countArg - 1], arg);
+		arg = strtok(NULL, cmdLine);
+	}
+	if(countArg > MAX_ARG_IN_CMD){
+		sprintf(errorString, "Слишком много аргументов в команде: %s - таких команд у нас нет. Используйте: help\n", cmdLine);
+		return -1;
+	}
+	cmd->argc = countArg;
+	strcpy(cmd->sourceCmdLine, cmdLine);
+	return 1;
+}
+
+/**
+Проверка корректности команды.
+Входные значения:
+	struct Command cmd - структура, которая содержит информацию о команде;
 	char *errorString - строка, которая будет содержать сообщение ошибки.
 Возвращаемое значение:
 	1 если все хорошо или -1 если команда неккоретна или не существует. Описание
 	ошибки содержится в переменной errorString.
 */
-int validateCommand(char *cmdLine, struct Command *cmd, char *errorString){
-	char *sep = " ";
-	char *firstArg = strtok(sep, cmdLine);
-	if(firstArg != NULL){
-		strcpy(cmd->argv[0], firstArg);
-		strcpy(cmd->argv[1], strtok(sep, cmdLine));
-		if(cmd->argv[1] == NULL){
-			cmd->argc = 1;
-		} else {
-			cmd->argc = 2;
+int validateCommand(struct Command cmd, char *errorString){
+	bzero(errorString, sizeof(errorString));
+	int argc = cmd.argc;
+	char *firstArg = cmd.argv[0];
+	char *cmdLine = cmd.sourceCmdLine;
+	if(!strcmp(firstArg, "ls")){
+		if(argc != 1){
+			sprintf(errorString, "Команда: %s - имеет лишние аргументы. Воспользуейтесь командой: help\n", cmdLine);
+			return -1;
 		}
-		if(!strcmp(firstArg, "ls")){
-			if(cmd->argc != 1){
-				sprintf(errorString, "Лишний аргумент ( %s ). Используйте: ls\n", cmd->argv[1]);
-				return -1;
-			}
-		} else if(!strcmp(firstArg, "cd")){
-			if(cmd->argc != 2){
-				//TODO отправлять ошибку клиенту
-				sprintf(errorString, "В команде: %s - не хватает аргумента. Используйте: cd [DIR]\n", cmdLine);
-				return -1;
-			}
-		} else if(!strcmp(firstArg, "load")){
-			if(cmd->argc != 2){
-				//TODO отправлять ошибку клиенту
-				sprintf(errorString, "В команде: %s - не хватает аргумента. Используйте: load [FILE_NAME]\n", cmdLine);
-				return -1;
-			}
-		} else if(!strcmp(firstArg, "get")){
-			if(cmd->argc != 2){
-				//TODO отправлять ошибку клиенту
-				sprintf(errorString, "В команде: %s - не хватает аргумента. Используйте: get [FILE_NAME]\n", cmdLine);
-				return -1;
-			}
-		} else if(!strcmp(firstArg, "/kick")){
-			if(cmd->argc != 2){
-				sprintf(errorString, "В команде: %s - не хватает аргумента. Используйте: /kick [CLIENT_NUMBER]\n", cmdLine);
-				return -1;
-			}
-			char *pattern = "^\\d+$";
-			regex_t preg;
-    		int err,regerr;
-    		err = regcomp (&preg, pattern, REG_EXTENDED);
-    		if(err != 0){
-    			sprintf(errorString, "Не получилось скомпилировать регулярное выражение: %s\n", pattern);
-    			return -1;
-    		}
-    		regmatch_t pm;
-    		regerr = regexec (&preg, cmd->argv[1], 0, &pm, 0);
-    		if(regerr != 0){
-    			sprintf(errorString, "Аргумент ( %s ) в команде: %s - неккоретен!\n", cmd->argv[1], cmdLine);
-    			return -1;
-    		}
-		} else if(!strcmp(firstArg, "/shutdown")){
-			if(cmd->argc != 1){
-				sprintf(errorString, "Лишний аргумент ( %s ). Используйте: /shutdown\n", cmd->argv[1]);
-				return -1;
-			}
-		} else {
-			sprintf(errorString, "Неизвестный первый аргумент ( %s ) команды: %s\n", cmd->argv[0], cmdLine);
+	} else if(!strcmp(firstArg, "cd")){
+		if(argc != 2){
+			sprintf(errorString, "Команда: %s - имеет много или мало аргументов. Воспользуейтесь командой: help\n", cmdLine);
+			return -1;
+		}
+	} else if(!strcmp(firstArg, "load")){
+		if(argc != 2){
+			sprintf(errorString, "Команда: %s - имеет много или мало аргументов. Воспользуейтесь командой: help\n", cmdLine);
+			return -1;
+		}
+	} else if(!strcmp(firstArg, "get")){
+		if(argc != 2){
+			sprintf(errorString, "Команда: %s - имеет много или мало аргументов. Воспользуейтесь командой: help\n", cmdLine);
+			return -1;
+		}
+	} else if(!strcmp(firstArg, "/kick")){
+		if(argc != 2){
+			sprintf(errorString, "Команда: %s - имеет много или мало аргументов. Воспользуейтесь командой: help\n", cmdLine);
+			return -1;
+		}
+		char *pattern = "^\\d+$";
+		regex_t preg;
+    	int err,regerr;
+    	err = regcomp (&preg, pattern, REG_EXTENDED);
+    	if(err != 0){
+    		fprintf(stdout, "Не получилось скомпилировать регулярное выражение: %s\n", pattern);
+    		sprintf(errorString, "С командой: %s - что-то не так. Воспользуейтесь командой: help\n", cmdLine);
+    		return -1;
+    	}
+    	regmatch_t pm;
+    	regerr = regexec (&preg, cmd.argv[1], 0, &pm, 0);
+    	if(regerr != 0){
+    		sprintf(errorString, "Команда: %s - имеет некорретные аргументы. Воспользуейтесь командой: /help\n", cmdLine);
+    		return -1;
+    	}
+	} else if(!strcmp(firstArg, "/shutdown")){
+		if(argc!= 1){
+			sprintf(errorString, "Команда: %s - имеет лишние аргументы! Воспользуейтесь командой: /help\n", cmdLine);
 			return -1;
 		}
 	} else {
-		sprintf(errorString, "С командой: %s - все плохо!\n", cmdLine);
+		sprintf(errorString, "Неизвстная команда: %s. Воспользуейтесь командой: help\n", cmdLine);
 		return -1;
 	}
 	return 1;
@@ -478,31 +488,4 @@ int validateCommand(char *cmdLine, struct Command *cmd, char *errorString){
 */
 int readFile(int socket){
 
-}
-
-/**
-Функиця читает N байт из сокета. Поток будет заблокирован на этой функции, 
-пока не будет считано заданное количество байт или пока не произойдет
-закрытие сокета. В конце всегда стоит символ конца строки.
-Входные значения:
-	int socket - сокет-дескриптор, из которого будут считаны данные
-	char *buf - строка, куда будут считаны данные
-	int length - количество байт, которое необходимо считать
-Возвращаемое значение:
-	Количество считанных байт или -1 если не удалось считать данные.
-*/
-int readN(int socket, char* buf, int length){
-	int result = 0;
-	int readedBytes = 0;
-	int sizeMsg = length;
-	while(sizeMsg > 0){
-		readedBytes = recv(socket, buf + result, sizeMsg, 0);
-		if (readedBytes <= 0){
-			return -1;
-		}
-		result += readedBytes;
-		sizeMsg -= readedBytes;
-	}
-	buf[strlen(buf) - 1] = '\0';
-	return result;
 }
