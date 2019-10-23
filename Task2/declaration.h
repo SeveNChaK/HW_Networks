@@ -9,7 +9,7 @@
 */
 #define SIZE_MSG 5000
 #define MAX_ARG_IN_CMD 100
-#define MAX_ARG_SIZE 4097
+#define MAX_ARG_SIZE 5000
 #define DEFAULT_SIZE_STRING 100
 #define SIZE_ERR_STRING 300
 
