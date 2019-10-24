@@ -205,9 +205,7 @@ void* listenerConnetions(void* args){
       		break;
         }
 
-        //TODO провераем чтение (оба), ставим запись (оба)
-        	pthread_mutex_lock(&mutex);
-        //----
+        pthread_mutex_lock(&mutex);
         //TODO добавить функцию поиска свободного места и только если нет места, увеличивать размер
         	int indexClient = clientQuantity;
         	clients = (struct Client*) realloc(clients, sizeof(struct Client) * (clientQuantity + 1));
@@ -224,21 +222,16 @@ void* listenerConnetions(void* args){
             fprintf(stderr, "%s\n", "Не удалось создать поток для клиента, клиент не будет обрабатываться!");
             continue;
         }
-        //TODO убираем запись (оба)
-        	pthread_mutex_unlock(&mutex);
-        //----
         
-        
-        //TODO провераем чтение, ставим запись
         clientQuantity++;
-        //TODO убираем запись
+        pthread_mutex_unlock(&mutex);
     }
 
-    //TODO проверяем запись (оба), ставим чтение (оба)
+    pthread_mutex_lock(&mutex);
     for (int i = 0; i < clientQuantity; i++){
     	pthread_join(clients[i].threadId, NULL);
     }
-    //TODO убираем чтение (оба)
+    pthread_mutex_unlock(&mutex);
 
     fprintf(stdout, "%s\n", "Ожидание подключений завершено.");
     free(clients);
@@ -248,14 +241,10 @@ void* listenerConnetions(void* args){
 Функция отключает всех клиентов.
 */
 void kickAllClients(){
-	//TODO проверяем запись, ставим чтение
-		pthread_mutex_lock(&mutex);
-	//----
+	pthread_mutex_lock(&mutex);
 	int count = clientQuantity;
-	//TODO убираем чтение
-    	pthread_mutex_unlock(&mutex);
-    //----
-    for(int i = 0; i < count; i++){ //Отключаем всех клиентов
+    pthread_mutex_unlock(&mutex);
+    for(int i = 0; i < count; i++){
     	kickClient(i);
     }
     fprintf(stdout, "%s\n", "Отключение всех клиентов завершено.");
@@ -266,15 +255,11 @@ void kickAllClients(){
 Входные значения:
 	int kickNum - номер отключаемого клиента
 */
-void kickClient(int kickNum){
-	//TODO проверяем чтение, ставим запись
-		pthread_mutex_lock(&mutex);
-	//----
+void kickClient(int kickNum)
+	pthread_mutex_lock(&mutex);
 	close(clients[kickNum].socket);
 	clients[kickNum].socket = -1;
-	//TODO убираем запись
-    	pthread_mutex_unlock(&mutex);
-    //----
+    pthread_mutex_unlock(&mutex);
     fprintf(stdout, "Кажись клиент №%d был отключен.\n", kickNum);
 }
 
@@ -288,14 +273,10 @@ void kickClient(int kickNum){
 */
 void* clientHandler(void* args){
 	int indexClient = *((int*)args);
-	//TODO проверяем запись, стави чтение
-		pthread_mutex_lock(&mutex);
-	//----
+	pthread_mutex_lock(&mutex);
 	struct Client *client = &(clients[indexClient]);
 	int clientSocket = client->socket;
-	//TODO убираем чтение
-		pthread_mutex_unlock(&mutex);
-	//----
+	pthread_mutex_unlock(&mutex);
 
 	fprintf(stdout, "Соединение с клиентом №%d установлено.\n", indexClient);
 
@@ -352,7 +333,7 @@ int execClientCommand(struct Client *client, char *cmdLine, char *errorString){
 	}
 	fprintf(stdout, "Команда клиента: %s - корректна.\n", cmdLine);
 	pthread_mutex_lock(&mutex);
-	struct Client clientCopy = *client; //ВОПРОС Надо ли? Тип просто чтение же
+	struct Client clientCopy = *client;
 	pthread_mutex_unlock(&mutex);
 	if(!strcmp(cmd.argv[0], "ls")) {
 		return sendListFilesInDir(clientCopy, errorString);
@@ -410,13 +391,20 @@ void makeDir(struct Path path, char *dirResult){
 }
 
 int changeClientDir(struct Client *client, char *path, char *errorString){
+	pthread_mutex_lock(&mutex);
 	int count = client->dir.count;
+	pthread_mutex_unlock(&mutex);
 	if(!strcmp(path, "..")){
+		pthread_mutex_lock(&mutex);
 		bzero(client->dir.path[count - 1], sizeof(client->dir.path[count - 1]));
 		client->dir.count--;
+		pthread_mutex_unlock(&mutex);
 	} else {
 		char tempPath[SIZE_MSG] = {0};
-		makeDir(client->dir, tempPath);
+		pthread_mutex_lock(&mutex);
+		struct Path t = client->dir;
+		pthread_mutex_unlock(&mutex);
+		makeDir(t, tempPath);
 		strcat(tempPath, "/");
 		strcat(tempPath, path);
 		fprintf(stdout, "вот - %s\n", tempPath);
@@ -434,6 +422,7 @@ int changeClientDir(struct Client *client, char *path, char *errorString){
 	}
 	char clientDir[SIZE_MSG] = {0};
 	strcat(clientDir, "~/");
+	pthread_mutex_lock(&mutex);
 	count = client->dir.count;
 	if(count > 1){
 		for(int i = 1; i < count - 1; i++){
@@ -442,6 +431,7 @@ int changeClientDir(struct Client *client, char *path, char *errorString){
 		}
 		strcat(clientDir, client->dir.path[count - 1]);
 	}
+	pthread_mutex_unlock(&mutex);
 	strcat(clientDir, "$");
 	sendPack(client->socket, CODE_YOUR_PATH, clientDir);
 	return 1;

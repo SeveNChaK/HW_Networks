@@ -21,7 +21,7 @@
 #include "declaration.h"
 #include "dexchange.h"
 
-void execCommand(int sock);
+int execCommand(int sock);
 void sendFile(int sock, char *fileName);
 void readFile(int sock, char *fileName);
 
@@ -73,19 +73,21 @@ int main(int argc, char** argv) {
 			break;
 		}
 
-		execCommand(sock);
+		if(execCommand(sock) == 0){
+			break;
+		}
 	}
 	
 	return 0;
 }
 
-void execCommand(int sock){
+int execCommand(int sock){
 	struct Package package;
 	int code = -1;
 	for(;;){
 		if(readPack(sock, &package) == -1) {
 			fprintf(stderr, "Проблемы с получением ответа от сервера. Соединение разорвано!\n");
-			break;
+			return 0;
 		}
 
 		code = package.code;
@@ -105,6 +107,7 @@ void execCommand(int sock){
 			break;
 		}
 	}
+	return 1;
 }
 
 void sendFile(int sock, char *fileName){
