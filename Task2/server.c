@@ -43,7 +43,7 @@ struct Path{
 struct Client {
 	pthread_t threadId;
 	int socket;
-	char* address;
+	char address[SIZE_ADDR];
 	int port;
 	int number;
 	struct Path dir;
@@ -209,9 +209,11 @@ void* listenerConnetions(void* args){
         	clients = (struct Client*) realloc(clients, sizeof(struct Client) * (clientQuantity + 1));
         //----
         clients[indexClient].socket = clientSocket;
-        clients[indexClient].address = inet_ntoa(inetInfoAboutClient.sin_addr);
+        strcpy(clients[indexClient].address, inet_ntoa(inetInfoAboutClient.sin_addr));
         clients[indexClient].port = inetInfoAboutClient.sin_port; //TODO возможно тут надо htons или что-то такое
         clients[indexClient].number = indexClient;
+        strcpy(clients[indexClient].dir.path[0], rootDir);
+        clients[indexClient].dir.count = 1;
 
         if(pthread_create(&(clients[indexClient].threadId), NULL, clientHandler, (void*) &indexClient)) {
         	clients[indexClient].socket = -1; //Помечаем клиента, которого не удалось обработать как 'мертового'
@@ -235,6 +237,7 @@ void* listenerConnetions(void* args){
     //TODO убираем чтение (оба)
 
     fprintf(stdout, "%s\n", "Ожидание подключений завершено.");
+    free(clients);
 }
 
 /**
@@ -284,7 +287,8 @@ void* clientHandler(void* args){
 	//TODO проверяем запись, стави чтение
 		pthread_mutex_lock(&mutex);
 	//----
-	int clientSocket = clients[indexClient].socket;
+	struct Client *client = clients[indexClient];
+	int clientSocket = client.socket;
 	//TODO убираем чтение
 		pthread_mutex_unlock(&mutex);
 	//----
@@ -300,7 +304,7 @@ void* clientHandler(void* args){
 			break;
 		} else {
 			if(package.code == CODE_CMD){
-				int err = execClientCommand(clientSocket, package.data, errorString);
+				int err = execClientCommand(client, package.data, errorString);
 				if(err == -1){
 					sendPack(clientSocket, CODE_ERROR, errorString);
 				}
@@ -324,13 +328,14 @@ void* clientHandler(void* args){
 	load [FILE_NAME] - загружает файл на сервер;
 	get [FILE_NAME] - отправляет файл пользователю.
 Входные значения:
-	int clientSocket - сокет-дескриптор клиента;
-	char *cmdLine - строка, которая содержит команду;
-	char *errorString - строка, которая будет содержать описание ошибки.
+	struct Client *client - структура, которая содержит информацию о клиенте;
+	char *cmdLine - строка, которая содержит исходную команду;
+	char *errorString - строка, которая содержит описание ошибки.
 Возвращаемое значение:
-	1 - команда выполнена или -1 елси возникла ошибка. Описание проблемы содержиться в переменной errorString.
+	1 - команда выполнена или -1 елси возникла ошибка. Описание ошибки содержиться в 
+	переменной errorString.
 */
-int execClientCommand(int clientSocket, char *cmdLine, char *errorString){
+int execClientCommand(struct Client *client, char *cmdLine, char *errorString){
 	bzero(errorString, sizeof(errorString));
 	struct Command cmd;
 	if(parseCmd(cmdLine, &cmd, errorString) == -1){
@@ -342,20 +347,17 @@ int execClientCommand(int clientSocket, char *cmdLine, char *errorString){
 		return -1;
 	}
 	fprintf(stdout, "Команда клиента: %s - корректна.\n", cmdLine);
+	struct CLient clientCopy = *client;
 	if(!strcmp(cmd.argv[0], "ls")) {
-		sprintf(errorString, "В разработке... Команда: %s\n", cmdLine);
-		return -1;
+		return sendListFilesInDir(*client, errorString); //TODO
 	} else if(!strcmp(cmd.argv[0], "cd")) {
-		sprintf(errorString, "В разработке... Команда: %s\n", cmdLine);
-		return -1;
+		return changeClientDir(client, cmd->argv[1], errorString); //TDOO
 	} else if(!strcmp(cmd.argv[0], "load")) {
-		sprintf(errorString, "В разработке... Команда: %s\n", cmdLine);
-		return -1;
+		return readFile(*client, cmd->argv[1], errorString); //TODO
 	} else if(!strcmp(cmd.argv[0], "get")){
-		sprintf(errorString, "В разработке... Команда: %s\n", cmdLine);
-		return -1;
+		return sendFile(*client, cmd->argv[1], errorString); //TODO
 	} else {
-		sprintf(stderr, "Хоть мы все ипроверили, но что-то с ней не так: %s\n", cmdLine);
+		sprintf(stderr, "Хоть мы все и проверили, но что-то с ней не так: %s\n", cmdLine);
 		return -1;
 	}
 	return 1;
@@ -374,7 +376,7 @@ int execClientCommand(int clientSocket, char *cmdLine, char *errorString){
 	или -1 если произошла какая-то ошибка. Описание ошибки содержится в
 	переменной errorString.
 */
-int execServerCommand(char *cmdLine, char *errorString){
+int execServerCommand(char *cmdLine, char *errorString){ //TODO
 	bzero(errorString, sizeof(errorString));
 	struct Command cmd;
 	if(parseCmd(cmdLine, &cmd, errorString) == -1){
@@ -400,11 +402,11 @@ int execServerCommand(char *cmdLine, char *errorString){
 /**
 Функция парсит входную строку, на аргументы.
 Входные значения:
-	char *cmdLine - исходная строка, которая содержит команду;
-	struct Command *cmd - ссылка на структуру, в которую будет записана информация о команде;
-	char *errorString - строка, которая будет соодежать сообщение об ошибке.
+	char *cmdLine - строка, которая содержит исходную команду;
+	struct Command *cmd - структура, в которую будет записана информация о команде;
+	char *errorString - строка, которая соодержит описание.
 Возвращаемое значение:
-	1 - если все хорошо или -1 если произошла ошибка. Описание ошибки содержится в переменной 
+	1 если все хорошо или -1 если произошла ошибка. Описание ошибки содержится в переменной 
 	errorString.
 */
 int parseCmd(char *cmdLine, struct Command *cmd, char *errorString){
@@ -434,10 +436,10 @@ int parseCmd(char *cmdLine, struct Command *cmd, char *errorString){
 Парсинг пути к директории. Сохранение каждого католога, как отдельный элемент массива.
 Входные значения:
 	cgar *pathLine - строка, которая содержит исходный путь к директории;
-	struct Path *path - структура, которая содержит информацию о пути;
+	struct Path *path - структура, в которую будет записана информация о пути;
 	char *errorString - строка, которая содержит описание ошибки.
 Возвращаемое значение:
-	1 если все хорошо или -1 если произошла ошибка. Описание ошибки содержится в строке errorString.
+	1 если все хорошо или -1 если произошла ошибка. Описание ошибки содержится в переменной errorString.
 */
 int parsePath(char *pathLine, struct Path *path, char *errorString){
 	bzero(errorString, sizeof(errorString));
@@ -466,10 +468,10 @@ int parsePath(char *pathLine, struct Path *path, char *errorString){
 Проверка корректности команды.
 Входные значения:
 	struct Command cmd - структура, которая содержит информацию о команде;
-	char *errorString - строка, которая будет содержать сообщение ошибки.
+	char *errorString - строка, которая содержит описание ошибки.
 Возвращаемое значение:
-	1 если все хорошо или -1 если команда неккоретна или не существует. Описание
-	ошибки содержится в переменной errorString.
+	1 если все хорошо или -1 если произошла ошибка. Описание ошибки содержится
+	в переменной errorString.
 */
 int validateCommand(struct Command cmd, char *errorString){
 	bzero(errorString, sizeof(errorString));
