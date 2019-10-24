@@ -19,13 +19,14 @@
 #define MAX_COUNT_DIR 100
 
 #define CODE_CMD 0
-#define CODE_WAIT_FILE 100
+#define CODE_REQUEST_FILE 100
 #define CODE_FILE_SECTION 101
 #define CODE_FILE_LAST_SECTION 102
 #define CODE_OK 200
 #define CODE_ERROR 300
 #define CODE_INFO 400
 #define CODE_YOUR_PATH 401
+
 #define CODE_TEST 6
 
 

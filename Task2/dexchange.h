@@ -12,6 +12,7 @@
 	Количество считанных байт или -1 если не удалось считать команду.
 */
 int readPack(int socket, struct Package *package){
+	bzero(package->data, sizeof(package->data));
 	int result = readN(socket, package, sizeof(struct Package));
 	if(result < 0 ){
 		fprintf(stderr, "%s\n", "Не удалось считать пакет!");

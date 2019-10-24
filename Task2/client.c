@@ -25,6 +25,8 @@ void execCommand(int sock);
 void sendFile(int sock, char *fileName);
 void readFile(int sock, char *fileName);
 
+char workDir[SIZE_MSG];
+
 int main(int argc, char** argv) {
 
 	if(argc != 3){
@@ -51,10 +53,12 @@ int main(int argc, char** argv) {
 		exit(1);
 	}
 	
-	fprintf(stdout, "%s", "~$:"); fflush(stdout);
+	bzero(workDir, sizeof(workDir));
+	strcpy(workDir, "~$");
 
 	char inputBuf[SIZE_MSG];
 	for(;;){
+		fprintf(stdout, "%s", workDir);
 		bzero(inputBuf, sizeof(inputBuf));
 		fgets(inputBuf, sizeof(inputBuf), stdin);
 		inputBuf[strlen(inputBuf) - 1] = '\0';
@@ -64,12 +68,7 @@ int main(int argc, char** argv) {
 			break;
 		}
 
-		// if(sendPack(sock, CODE_CMD, inputBuf) == -1){
-		// 	fprintf(stderr, "Проблемы с отправкой команды на сервер. Соединение разорвано!\n");
-		// 	break;
-		// }
-
-		if(sendPack(sock, CODE_TEST, inputBuf) == -1){
+		if(sendPack(sock, CODE_CMD, inputBuf) == -1){
 			fprintf(stderr, "Проблемы с отправкой команды на сервер. Соединение разорвано!\n");
 			break;
 		}
@@ -95,10 +94,13 @@ void execCommand(int sock){
 			fprintf(stderr, "Возникла ошибка!\n%s\n", package.data); fflush(stderr);
 		} else if(code == CODE_INFO){
 			fprintf(stdout, "%s\n", package.data);
-		} else if(code == CODE_WAIT_FILE){
+		} else if(code == CODE_REQUEST_FILE){
 			sendFile(sock, package.data);
-		} else if(code == CODE_SENDING_FILE){
+		} else if(code == CODE_FILE_SECTION){
 			readFile(sock, package.data);
+		} else if(code == CODE_YOUR_PATH){
+			bzero(workDir, sizeof(workDir));
+			strcpy(workDir, package.data);
 		} else if(code == CODE_OK){
 			break;
 		}

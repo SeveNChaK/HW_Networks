@@ -8,13 +8,15 @@
 #include <pthread.h>
 #include <string.h>
 #include <regex.h>
+#include <dirent.h>
 
 #include "declaration.h"
 #include "dexchange.h"
 
 /*
 ВОПРОСЫ
-	- Копирование структуры?
+	- Корректность заданого корневого пути?
+	- Валидация полученного пути? Какая?
 */
 
 /*
@@ -38,7 +40,7 @@ struct Path{
 	int count;
 	char path[MAX_COUNT_DIR][MAX_LENGTH_FILE_NAME];
 	char sourcePathLine[SIZE_MSG];
-}
+};
 
 struct Client {
 	pthread_t threadId;
@@ -58,10 +60,12 @@ void kickAllClients();
 void kickClient(int kickNum);
 void* clientHandler(void* args);
 int readFile(int socket);
-int execClientCommand(int clientSocket, char *cmdLine, char *errorString);
+int execClientCommand(struct Client *client, char *cmdLine, char *errorString);
 int execServerCommand(char *cmdLine, char *errorString);
 int parseCmd(char *cmdLine, struct Command *cmd, char *errorString);
 int validateCommand(struct Command cmd, char *errorString);
+int sendListFilesInDir(struct Client client, char *errorString);
+void makeDir(struct Path path, char *dirResult);
 
 
 int main( int argc, char** argv) {
@@ -287,8 +291,8 @@ void* clientHandler(void* args){
 	//TODO проверяем запись, стави чтение
 		pthread_mutex_lock(&mutex);
 	//----
-	struct Client *client = clients[indexClient];
-	int clientSocket = client.socket;
+	struct Client *client = &(clients[indexClient]);
+	int clientSocket = client->socket;
 	//TODO убираем чтение
 		pthread_mutex_unlock(&mutex);
 	//----
@@ -347,19 +351,99 @@ int execClientCommand(struct Client *client, char *cmdLine, char *errorString){
 		return -1;
 	}
 	fprintf(stdout, "Команда клиента: %s - корректна.\n", cmdLine);
-	struct CLient clientCopy = *client;
+	pthread_mutex_lock(&mutex);
+	struct Client clientCopy = *client; //ВОПРОС Надо ли? Тип просто чтение же
+	pthread_mutex_unlock(&mutex);
 	if(!strcmp(cmd.argv[0], "ls")) {
-		return sendListFilesInDir(*client, errorString); //TODO
+		return sendListFilesInDir(clientCopy, errorString);
 	} else if(!strcmp(cmd.argv[0], "cd")) {
-		return changeClientDir(client, cmd->argv[1], errorString); //TDOO
+		return changeClientDir(client, cmd.argv[1], errorString); //TDOO
 	} else if(!strcmp(cmd.argv[0], "load")) {
-		return readFile(*client, cmd->argv[1], errorString); //TODO
+		// return readFile(clientCopy, cmd.argv[1], errorString); //TODO
 	} else if(!strcmp(cmd.argv[0], "get")){
-		return sendFile(*client, cmd->argv[1], errorString); //TODO
+		// return sendFile(clientCopy, cmd.argv[1], errorString); //TODO
 	} else {
 		sprintf(stderr, "Хоть мы все и проверили, но что-то с ней не так: %s\n", cmdLine);
 		return -1;
 	}
+	return 1;
+}
+
+int sendListFilesInDir(struct Client client, char *errorString){
+	char dirStr[SIZE_MSG] = {'\0'};
+	makeDir(client.dir, dirStr);
+	DIR *dir = opendir(dirStr);
+	if(dir == NULL){
+		fprintf(stdout, "Не смог открыть директорию - %s\n", dirStr);
+		sprintf(errorString, "Не удалось получить список файлов из директории - %s. Возможно она не существует.\n", dirStr);
+		return -1;
+	}
+	struct dirent *dirent;
+	char fname[SIZE_MSG] = {0};
+	while((dirent = readdir(dir)) != NULL){
+		if(dirent->d_name[0] == '.'){
+			continue;
+		}
+		strcpy(fname, dirent->d_name);
+		if(sendPack(client.socket, CODE_INFO, fname) == -1){
+			fprintf(stdout, "Проблема с отправкой имени файла из директории - %s\n", dirStr);
+			sprintf(errorString, "Не получилось отправить навзание файла из директории - %s", dirStr);
+			return -1;
+		}
+		bzero(fname, sizeof(fname));
+	}
+	if(closedir(dir) == -1){
+		fprintf(stdout, "Беда! Не могу закрыть директорию - %s", dirStr);
+		sprintf(stderr, "Дичь, очень сранная проблема.");
+		return -1;
+	}
+	return 1;
+}
+
+void makeDir(struct Path path, char *dirResult){
+	int count = path.count;
+	for(int i = 0; i < count - 1; i++){
+		strcat(dirResult, path.path[i]);
+		strcat(dirResult, "/");
+	}
+	strcat(dirResult, path.path[count - 1]);
+}
+
+int changeClientDir(struct Client *client, char *path, char *errorString){
+	int count = client->dir.count;
+	if(!strcmp(path, "..")){
+		bzero(client->dir.path[count - 1], sizeof(client->dir.path[count - 1]));
+		client->dir.count--;
+	} else {
+		char tempPath[SIZE_MSG] = {0};
+		makeDir(client->dir, tempPath);
+		strcat(tempPath, "/");
+		strcat(tempPath, path);
+		fprintf(stdout, "вот - %s\n", tempPath);
+		if(mkdir(tempPath) != -1){
+			sprintf(errorString, "Каталога не существует!");
+			if(rmdir(tempPath) == -1){
+				fprintf(stderr, "ВСЕ ПЛОХО!\n");
+			}
+			return -1;
+		}
+		int err = parsePath(path, &(client->dir), errorString);
+		if(err == -1){
+			return -1;
+		}
+	}
+	char clientDir[SIZE_MSG] = {0};
+	strcat(clientDir, "~/");
+	count = client->dir.count;
+	if(count > 1){
+		for(int i = 1; i < count - 1; i++){
+			strcat(clientDir, client->dir.path[i]);
+			strcat(clientDir, "/");
+		}
+		strcat(clientDir, client->dir.path[count - 1]);
+	}
+	strcat(clientDir, "$");
+	sendPack(client->socket, CODE_YOUR_PATH, clientDir);
 	return 1;
 }
 
@@ -413,7 +497,8 @@ int parseCmd(char *cmdLine, struct Command *cmd, char *errorString){
 	bzero(errorString, sizeof(errorString));
 	int countArg = 0;
 	char *sep = " ";
-	char *arg = strtok(sep, cmdLine);
+	char *arg = strtok(cmdLine, sep);
+	fprintf(stdout, "Сари - %s\n", arg);
 	if(arg == NULL){
 		sprintf(errorString, "Команда: %s - не поддается парсингу.\nВведите корректную команду. Используйте: help\n", cmdLine);
 		return -1;
@@ -421,7 +506,7 @@ int parseCmd(char *cmdLine, struct Command *cmd, char *errorString){
 	while(arg != NULL && countArg <= MAX_ARG_IN_CMD){
 		countArg ++;
 		strcpy(cmd->argv[countArg - 1], arg);
-		arg = strtok(NULL, cmdLine);
+		arg = strtok(NULL, sep);
 	}
 	if(countArg > MAX_ARG_IN_CMD){
 		sprintf(errorString, "Слишком много аргументов в команде: %s - таких команд у нас нет. Используйте: help\n", cmdLine);
@@ -444,8 +529,12 @@ int parseCmd(char *cmdLine, struct Command *cmd, char *errorString){
 int parsePath(char *pathLine, struct Path *path, char *errorString){
 	bzero(errorString, sizeof(errorString));
 	int countArg = path->count;
+	if(pathLine[0] == '/'){
+		sprintf(errorString, "Неккоретный путь!");
+		return -1;
+	}
 	char *sep = "/";
-	char *arg = strtok(sep, pathLine);
+	char *arg = strtok(pathLine, sep);
 	if(arg == NULL){
 		sprintf(errorString, "Неверный путь: %s\nИспользуйте: path/to/dir\n", pathLine);
 		return -1;
@@ -453,7 +542,7 @@ int parsePath(char *pathLine, struct Path *path, char *errorString){
 	while(arg != NULL && countArg <= MAX_COUNT_DIR){
 		countArg++;
 		strcpy(path->path[countArg - 1], arg);
-		arg = strtok(NULL, pathLine);
+		arg = strtok(NULL, sep);
 	}
 	if(countArg > MAX_COUNT_DIR){
 		sprintf(errorString, "Слишком много вложенных директорий. MAX = %d\n", MAX_COUNT_DIR);
