@@ -16,16 +16,6 @@
 /*
 ВОПРОСЫ
 	- Корректность заданого корневого пути?
-	- Валидация полученного пути? Какая?
-*/
-
-/*
-TODO
-Необходимые блокировки:
-	чтение clients
-	запись clients
-	чтение clientQuantity
-	запись clientQuantity
 */
 
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -66,6 +56,7 @@ int parseCmd(char *cmdLine, struct Command *cmd, char *errorString);
 int validateCommand(struct Command cmd, char *errorString);
 int sendListFilesInDir(struct Client client, char *errorString);
 void makeDir(struct Path path, char *dirResult);
+int changeClientDir(struct Client *client, char *path, char *errorString);
 
 
 int main( int argc, char** argv) {
