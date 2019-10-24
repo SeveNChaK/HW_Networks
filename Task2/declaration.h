@@ -9,9 +9,12 @@
 */
 #define SIZE_MSG 5000
 #define MAX_ARG_IN_CMD 100
-#define MAX_ARG_SIZE 5000
+#define MAX_ARG_SIZE 255
 #define DEFAULT_SIZE_STRING 100
 #define SIZE_ERR_STRING 300
+
+#define MAX_LENGTH_FILE_NAME 255
+#define MAX_COUNT_DIR 100
 
 #define CODE_CMD 0
 #define CODE_WAIT_FILE 103

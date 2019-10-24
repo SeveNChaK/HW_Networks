@@ -13,6 +13,11 @@
 #include "dexchange.h"
 
 /*
+ВОПРОСЫ
+	- Копирование структуры?
+*/
+
+/*
 TODO
 Необходимые блокировки:
 	чтение clients
@@ -29,14 +34,22 @@ struct Command {
 	char sourceCmdLine[SIZE_MSG];
 };
 
+struct Path{
+	int count;
+	char path[MAX_COUNT_DIR][MAX_LENGTH_FILE_NAME];
+	char sourcePathLine[SIZE_MSG];
+}
+
 struct Client {
-    pthread_t threadId;
-    int socket;
-    char* address;
-    int port;
-    int number;
+	pthread_t threadId;
+	int socket;
+	char* address;
+	int port;
+	int number;
+	struct Path dir;
 } *clients;
 int clientQuantity = 0;
+char *rootDir;
 
 
 void initServerSocket(int *serverSocket, int port);
@@ -59,7 +72,7 @@ int main( int argc, char** argv) {
 	}
 
 	int port = *((int*) argv[1]);
-	char *workPath = argv[2];
+	rootDir = argv[2];
 	int serverSocket = -1;
 	initServerSocket(&serverSocket, port);
     
@@ -414,6 +427,38 @@ int parseCmd(char *cmdLine, struct Command *cmd, char *errorString){
 	}
 	cmd->argc = countArg;
 	strcpy(cmd->sourceCmdLine, cmdLine);
+	return 1;
+}
+
+/**
+Парсинг пути к директории. Сохранение каждого католога, как отдельный элемент массива.
+Входные значения:
+	cgar *pathLine - строка, которая содержит исходный путь к директории;
+	struct Path *path - структура, которая содержит информацию о пути;
+	char *errorString - строка, которая содержит описание ошибки.
+Возвращаемое значение:
+	1 если все хорошо или -1 если произошла ошибка. Описание ошибки содержится в строке errorString.
+*/
+int parsePath(char *pathLine, struct Path *path, char *errorString){
+	bzero(errorString, sizeof(errorString));
+	int countArg = path->count;
+	char *sep = "/";
+	char *arg = strtok(sep, pathLine);
+	if(arg == NULL){
+		sprintf(errorString, "Неверный путь: %s\nИспользуйте: path/to/dir\n", pathLine);
+		return -1;
+	}
+	while(arg != NULL && countArg <= MAX_COUNT_DIR){
+		countArg++;
+		strcpy(path->path[countArg - 1], arg);
+		arg = strtok(NULL, pathLine);
+	}
+	if(countArg > MAX_COUNT_DIR){
+		sprintf(errorString, "Слишком много вложенных директорий. MAX = %d\n", MAX_COUNT_DIR);
+		return -1;
+	}
+	path->count = countArg;
+	strcpy(path->sourcePathLine, pathLine);
 	return 1;
 }
 
