@@ -155,7 +155,7 @@ void initServerSocket(int *serverSocket, int port){
 	}
 
 	int enable = 1;
-	if (setsockopt(serverSocket, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(int)) < 0){
+	if (setsockopt(serverSocket, IPPROTO_TCP, SO_REUSEADDR, &enable, sizeof(int)) < 0){
     	fprintf(stderr, "%s\n", "setsockopt(SO_REUSEADDR) failed!");
 	}
 
@@ -605,6 +605,9 @@ int validateCommand(struct Command cmd, char *errorString){
 	return 1;
 }
 
+
+//TODO исправить пути к фалу на клиенте
+//передача НЕ текстовых файлов
 /**
 Получает файл от клиента.
 */
@@ -616,7 +619,7 @@ int readFile(struct Client client, char *fileName, char *errorString){
 	strcat(dirStr, "/");
 	strcat(dirStr, fileName);
 
-	FILE *file = fopen(dirStr, "w");
+	FILE *file = fopen(dirStr, "wb");
 	if(file == NULL){
 		fprintf(stderr, "Не удалось открыть файл: %s - для записи!\n", dirStr);
 		sprintf(errorString, "Не удалось загрузить файл - %s.", fileName);
@@ -632,7 +635,8 @@ int readFile(struct Client client, char *fileName, char *errorString){
 			return -1;
 		}
 		if(package.code == CODE_FILE_SECTION){
-			fputs(package.data, file);
+			fwrite(package.data, sizeof(char), strlen(package.data) - 1, file);
+			// fputs(package.data, file);
 		} else if(package.code == CODE_FILE_END){
 			fprintf(stdout, "Файл: %s - получен.\n", fileName);
 			break;
