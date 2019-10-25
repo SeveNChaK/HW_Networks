@@ -111,7 +111,20 @@ int execCommand(int sock){
 }
 
 void sendFile(int sock, char *fileName){
-
+	FILE *file = fopen(fileName, "r");
+	fprintf(stdout, "file - %s\n", fileName);
+	if(file == NULL){
+		fprintf(stdout, "Не удалось загрузит файл - %s\n", fileName);
+		sendPack(sock, CODE_CANCEL, "Отмена.");
+		return;
+	}
+	char section[SIZE_MSG] = {0};
+	while(fgets(section, SIZE_MSG, file) != NULL){
+		sendPack(sock, CODE_FILE_SECTION, section);
+		bzero(section, sizeof(section));
+	}
+	fclose(file);
+	sendPack(sock, CODE_FILE_END, "Файл отправлен полностью.");
 }
 
 void readFile(int sock, char *fileName){

@@ -16,6 +16,7 @@
 /*
 ВОПРОСЫ
 	- Корректность заданого корневого пути?
+	- Отправка картинок и других НЕ текстовых фалов? Как это правильно сделать?
 */
 
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -49,7 +50,7 @@ void* listenerConnetions(void* args);
 void kickAllClients();
 void kickClient(int kickNum);
 void* clientHandler(void* args);
-int readFile(int socket);
+int readFile(struct Client client, char *fileName, char *errorString);
 int execClientCommand(struct Client *client, char *cmdLine, char *errorString);
 int execServerCommand(char *cmdLine, char *errorString);
 int parseCmd(char *cmdLine, struct Command *cmd, char *errorString);
@@ -246,7 +247,7 @@ void kickAllClients(){
 Входные значения:
 	int kickNum - номер отключаемого клиента
 */
-void kickClient(int kickNum)
+void kickClient(int kickNum){
 	pthread_mutex_lock(&mutex);
 	close(clients[kickNum].socket);
 	clients[kickNum].socket = -1;
@@ -329,9 +330,9 @@ int execClientCommand(struct Client *client, char *cmdLine, char *errorString){
 	if(!strcmp(cmd.argv[0], "ls")) {
 		return sendListFilesInDir(clientCopy, errorString);
 	} else if(!strcmp(cmd.argv[0], "cd")) {
-		return changeClientDir(client, cmd.argv[1], errorString); //TDOO
+		return changeClientDir(client, cmd.argv[1], errorString);
 	} else if(!strcmp(cmd.argv[0], "load")) {
-		// return readFile(clientCopy, cmd.argv[1], errorString); //TODO
+		return readFile(clientCopy, cmd.argv[1], errorString); //TODO
 	} else if(!strcmp(cmd.argv[0], "get")){
 		// return sendFile(clientCopy, cmd.argv[1], errorString); //TODO
 	} else {
@@ -386,10 +387,14 @@ int changeClientDir(struct Client *client, char *path, char *errorString){
 	int count = client->dir.count;
 	pthread_mutex_unlock(&mutex);
 	if(!strcmp(path, "..")){
-		pthread_mutex_lock(&mutex);
-		bzero(client->dir.path[count - 1], sizeof(client->dir.path[count - 1]));
-		client->dir.count--;
-		pthread_mutex_unlock(&mutex);
+		if(count == 1){
+			sendPack(client->socket, CODE_INFO, "Вы находитесь в корневой директории.");
+		} else {
+			pthread_mutex_lock(&mutex);
+			bzero(client->dir.path[count - 1], sizeof(client->dir.path[count - 1]));
+			client->dir.count--;
+			pthread_mutex_unlock(&mutex);
+		}
 	} else {
 		char tempPath[SIZE_MSG] = {0};
 		pthread_mutex_lock(&mutex);
@@ -603,6 +608,42 @@ int validateCommand(struct Command cmd, char *errorString){
 /**
 Получает файл от клиента.
 */
-int readFile(int socket){
+int readFile(struct Client client, char *fileName, char *errorString){
+	sendPack(client.socket, CODE_REQUEST_FILE, fileName);
 
+	char dirStr[SIZE_MSG] = {0};
+	makeDir(client.dir, dirStr);
+	strcat(dirStr, "/");
+	strcat(dirStr, fileName);
+
+	FILE *file = fopen(dirStr, "w");
+	if(file == NULL){
+		fprintf(stderr, "Не удалось открыть файл: %s - для записи!\n", dirStr);
+		sprintf(errorString, "Не удалось загрузить файл - %s.", fileName);
+		return -1;
+	}
+
+	struct Package package;
+	for(;;){
+		int err = readPack(client.socket, &package);
+		if(err == -1){
+			fprintf(stdout, "Не удалось принять кусок файла - %s. Данные не были сохранены.\n", fileName);
+			sprintf(errorString, "Не удалось загрузить файл - %s.", fileName);
+			return -1;
+		}
+		if(package.code == CODE_FILE_SECTION){
+			fputs(package.data, file);
+		} else if(package.code == CODE_FILE_END){
+			fprintf(stdout, "Файл: %s - получен.\n", fileName);
+			break;
+		} else {
+			fprintf(stderr, "Пришел неправильный пакет с кодом - %d.\n", package.code);
+			sprintf(errorString, "Не удалось загрузить файл - %s.", fileName);
+			remove(dirStr);
+			return -1;
+		}
+	}
+	fclose(file);
+	sendPack(client.socket, CODE_INFO, "Файл загружен.\n");
+	return 1;
 }
