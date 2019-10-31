@@ -334,7 +334,7 @@ int execClientCommand(struct Client *client, char *cmdLine, char *errorString){
 	} else if(!strcmp(cmd.argv[0], "load")) {
 		return readFile(clientCopy, cmd.argv[1], errorString); //TODO
 	} else if(!strcmp(cmd.argv[0], "get")){
-		// return sendFile(clientCopy, cmd.argv[1], errorString); //TODO
+		return sendFile(clientCopy, cmd.argv[1], errorString); //TODO
 	} else {
 		sprintf(stderr, "Хоть мы все и проверили, но что-то с ней не так: %s\n", cmdLine);
 		return -1;
@@ -612,41 +612,84 @@ int validateCommand(struct Command cmd, char *errorString){
 */
 int readFile(struct Client client, char *fileName, char *errorString){
 	sendPack(client.socket, CODE_REQUEST_FILE, strlen(fileName) + 1, fileName);
+	char *sep = "/";
+	char *temp = strtok(fileName, sep);
+	char fName[SIZE_MSG];
+	while(temp != NULL){
+		bzero(fName, sizeof(fName));
+		strcpy(fName, temp);
+		temp = strtok(NULL, sep);
+	}
 
 	char dirStr[SIZE_MSG] = {0};
 	makeDir(client.dir, dirStr);
 	strcat(dirStr, "/");
-	strcat(dirStr, fileName);
+	strcat(dirStr, fName);
 
 	FILE *file = fopen(dirStr, "wb");
 	if(file == NULL){
 		fprintf(stderr, "Не удалось открыть файл: %s - для записи!\n", dirStr);
-		sprintf(errorString, "Не удалось загрузить файл - %s.", fileName);
+		sprintf(errorString, "Не удалось загрузить файл - %s.", fName);
 		return -1;
 	}
 
 	struct Package package;
+	int err;
 	for(;;){
-		int err = readPack(client.socket, &package);
+		err = readPack(client.socket, &package);
 		if(err == -1){
-			fprintf(stdout, "Не удалось принять кусок файла - %s. Данные не были сохранены.\n", fileName);
-			sprintf(errorString, "Не удалось загрузить файл - %s.", fileName);
+			fprintf(stdout, "Не удалось принять кусок файла - %s. Данные не были сохранены.\n", fName);
+			sprintf(errorString, "Не удалось загрузить файл - %s.", fName);
+			fclose(file);
+			remove(dirStr);
 			return -1;
 		}
 		if(package.code == CODE_FILE_SECTION){
 			fprintf(stdout, "Пишу байт - %d\n", package.sizeData);
 			fwrite(package.data, sizeof(char), package.sizeData, file);
 		} else if(package.code == CODE_FILE_END){
-			fprintf(stdout, "Файл: %s - получен.\n", fileName);
+			fprintf(stdout, "Файл: %s - получен.\n", fName);
 			break;
 		} else {
 			fprintf(stderr, "Пришел неправильный пакет с кодом - %d.\n", package.code);
-			sprintf(errorString, "Не удалось загрузить файл - %s.", fileName);
+			sprintf(errorString, "Не удалось загрузить файл - %s.", fName);
+			fclose(file);
 			remove(dirStr);
 			return -1;
 		}
 	}
 	fclose(file);
 	sendPack(client.socket, CODE_INFO, strlen("Файл загружен.\n") + 1, "Файл загружен.\n");
+	return 1;
+}
+
+int sendFile(struct Client client, char *fileName, char *errorString){
+	sendPack(client.socket, CODE_RESPONSE_FILE, strlen(fileName) + 1, fileName);
+
+	char dirStr[SIZE_MSG] = {0};
+	makeDir(client.dir, dirStr);
+	strcat(dirStr, "/");
+	strcat(dirStr, fileName);
+
+	FILE *file = fopen(dirStr, "rb");
+	if(file == NULL){
+		fprintf(stderr, "Не удалось открыть файл: %s - для записи!\n", dirStr);
+		sprintf(errorString, "Не удалось отправить файл - %s.", fileName);
+		return -1;
+	}
+	char section[SIZE_MSG] = {'\0'};
+	int res = 0, err;
+	while((res = fread(section, sizeof(char), sizeof(section), file)) != 0){
+		err = sendPack(client.socket, CODE_FILE_SECTION, res, section); //TODO обработать ошибку
+		if(err == -1){
+			fprintf(stderr, "Не удалось отправить кусок файла - %s\n", fileName);
+			sprintf(errorString, "Не удалось отправить файл - %s\n", fileName);
+			fclose(file);
+			return -1;
+		}
+		bzero(section, sizeof(section));
+	}
+	fclose(file);
+	sendPack(client.socket, CODE_FILE_END, strlen("Файл отправлен полностью.") + 1, "Файл отправлен полностью.");
 	return 1;
 }

@@ -98,7 +98,7 @@ int execCommand(int sock){
 			fprintf(stdout, "%s\n", package.data);
 		} else if(code == CODE_REQUEST_FILE){
 			sendFile(sock, package.data);
-		} else if(code == CODE_FILE_SECTION){
+		} else if(code == CODE_RESPONSE_FILE){
 			readFile(sock, package.data);
 		} else if(code == CODE_YOUR_PATH){
 			bzero(workDir, sizeof(workDir));
@@ -113,17 +113,21 @@ int execCommand(int sock){
 //TODO не давать передавать директорию
 void sendFile(int sock, char *fileName){
 	FILE *file = fopen(fileName, "rb");
-	fprintf(stdout, "file - %s\n", fileName);
 	if(file == NULL){
-		fprintf(stdout, "Не удалось загрузить файл - %s\n", fileName);
+		fprintf(stderr, "Не удалось загрузить файл - %s\n", fileName);
 		sendPack(sock, CODE_CANCEL, strlen("Отмена.") + 1, "Отмена.");
 		return;
 	}
 	char section[SIZE_MSG] = {'\0'};
-	int res = 0;
+	int res = 0, err;
 	while((res = fread(section, sizeof(char), sizeof(section), file)) != 0){
 		fprintf(stdout, "res = %d\n", res);
-		sendPack(sock, CODE_FILE_SECTION, res, section); //TODO обработать ошибку
+		err = sendPack(sock, CODE_FILE_SECTION, res, section); //TODO обработать ошибку
+		if(err == -1){
+			fprintf(stderr, "Не удалось отправить файл - %s\n", fileName);
+			fclose(file);
+			return;
+		}
 		bzero(section, sizeof(section));
 	}
 	fclose(file);
@@ -131,5 +135,43 @@ void sendFile(int sock, char *fileName){
 }
 
 void readFile(int sock, char *fileName){
+	char *sep = "/";
+	char *temp = strtok(fileName, sep);
+	char fName[SIZE_MSG];
+	while(temp != NULL){
+		bzero(fName, sizeof(fName));
+		strcpy(fName, temp);
+		temp = strtok(NULL, sep);
+	}
 
+	FILE *file = fopen(fName, "wb");
+	if(file == NULL){
+		fprintf(stderr, "Не удалось скачать файл - %s\n", fName);
+		sendPack(sock, CODE_CANCEL, strlen("Отмена") + 1, "Отмена");
+		return;
+	}
+
+	struct Package package;
+	int err;
+	for(;;){
+		err = readPack(sock, &package);
+		if(err == -1){
+			fprintf(stderr, "Не удалось принять кусок файла - %s. Данные не были сохранены.\n", fName);
+			fclose(file);
+			remove(fName);
+			return;
+		}
+		if(package.code == CODE_FILE_SECTION){
+			fwrite(package.data, sizeof(char), package.sizeData, file);
+		} else if(package.code == CODE_FILE_END){
+			fprintf(stdout, "Файл: %s - скачан.\n", fName);
+			break;
+		} else {
+			fprintf(stderr, "Не удалось принять кусок файла - %s. Данные не были сохранены.\n", fName);
+			fclose(file);
+			remove(fName);
+			return;
+		}
+	}
+	fclose(file);
 }
