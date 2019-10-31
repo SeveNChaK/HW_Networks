@@ -110,6 +110,7 @@ int execCommand(int sock){
 	return 1;
 }
 
+//TODO не давать передавать директорию
 void sendFile(int sock, char *fileName){
 	FILE *file = fopen(fileName, "rb");
 	fprintf(stdout, "file - %s\n", fileName);

@@ -37,7 +37,6 @@ int sendPack(int socket, int code, int sizeData, char *data){
 	package.code = code;
 	package.sizeData = sizeData;
 	memcpy(package.data, data, sizeData);
-	// strcpy(package.data, data);
 	int res = send(socket, &package, sizeof(struct Package), 0);
 	//TODO обработать ошибку
 	return res;
