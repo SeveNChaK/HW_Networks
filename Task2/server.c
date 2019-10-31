@@ -51,6 +51,7 @@ void kickAllClients();
 void kickClient(int kickNum);
 void* clientHandler(void* args);
 int readFile(struct Client client, char *fileName, char *errorString);
+int sendFile(struct Client client, char *fileName, char errorString);
 int execClientCommand(struct Client *client, char *cmdLine, char *errorString);
 int execServerCommand(char *cmdLine, char *errorString);
 int parseCmd(char *cmdLine, struct Command *cmd, char *errorString);
@@ -78,56 +79,6 @@ int main( int argc, char** argv) {
         fprintf(stderr, "%s\n", "Не удалось создать поток прослушивания подключений!");
         exit(1);
     }
-    
-	//Цикл чтения ввода с клавиатуры TODO фиксить
- //    printf("Input (/help to help): \n"); fflush(stdout);
- //    char buf[100];
-	// for(;;) {
-	// 	bzero(buf, 100);
-	// 	fgets(buf, 100, stdin);
-	// 	buf[strlen(buf) - 1] = '\0';
-		
-	// 	if(!strcmp("/help", buf)){
-	// 		printf("HELP:\n");
-	// 		printf("\'/lclients\' to list users on-line;\n");
-	// 		printf("\'/kick [number client]\' to kick client from server;\n");
-	// 		printf("\'/quit\' to shutdown;\n");
-	// 		fflush(stdout);
-	// 	} else if(!strcmp("/lclients", buf)){
-	// 			printf("Clients on-line:\n");
-	// 			printf(" NUMBER      ADDRESS            PORT\n");
-
-	// 			pthread_mutex_lock(&mutex);
-	// 			for(int i = 0; i < clientQuantity; i++){
-	// 				if(clients[i].socket != -1)
-	// 					printf("  %d       %s        %d\n", clients[i].number, clients[i].address, clients[i].port);
-	// 			}
-	// 			pthread_mutex_unlock(&mutex);
-
-	// 			fflush(stdout);
-	// 	} else if(!strcmp("/quit", buf)) {
-	// 			shutdown(listener, 2);
-	// 			close(listener);
-	// 			pthread_join(listenerThread, NULL);
-	// 			break;
-	// 	} else {
-	// 		char *sep = " ";
-	// 		char *str = strtok(buf, sep);
-	// 		if(str == NULL) {
-	// 			printf("Illegal format!\n"); fflush(stdout);
-	// 			continue;
-	// 		}
-	// 		if(!strcmp("/kick", str)){
-	// 			str = strtok(NULL, sep);
-	// 			int kickNum = atoi(str);
-	// 			if(str[0] != '0' && kickNum == 0){
-	// 				printf("Illegal format!\n"); fflush(stdout);
-	// 				continue;
-	// 			}
-	// 			kickClient(kickNum);
-	// 		}
-	// 	}
-	// }
 
 	pthread_join(listenerThread, NULL);
 	fprintf(stdout, "%s\n", "Сервер завершил работу.");
