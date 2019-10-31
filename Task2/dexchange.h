@@ -31,10 +31,13 @@ int readPack(int socket, struct Package *package){
 Возвращаемое значение:
 	Количество отправленных байт или -1 если возникла ошибка.
 */
-int sendPack(int socket, int code, char *data){
+int sendPack(int socket, int code, int sizeData, char *data){
 	struct Package package;
+	bzero(package.data, sizeof(package.data));
 	package.code = code;
-	strcpy(package.data, data);
+	package.sizeData = sizeData;
+	memcpy(package.data, data, sizeData);
+	// strcpy(package.data, data);
 	int res = send(socket, &package, sizeof(struct Package), 0);
 	//TODO обработать ошибку
 	return res;

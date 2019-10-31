@@ -283,14 +283,14 @@ void* clientHandler(void* args){
 			if(package.code == CODE_CMD){
 				int err = execClientCommand(client, package.data, errorString);
 				if(err == -1){
-					sendPack(clientSocket, CODE_ERROR, errorString);
+					sendPack(clientSocket, CODE_ERROR, strlen(errorString) + 1, errorString);
 				}
 			} else {
 				fprintf(stderr, "Ожидался пакет с кодом - %d, получили пакет с кодом - %d\n", CODE_CMD, package.code);
 				sprintf(errorString, "%s\n", "Ожидалась команда!");
-				sendPack(clientSocket, CODE_ERROR, errorString);
+				sendPack(clientSocket, CODE_ERROR, strlen(errorString) + 1, errorString);
 			}
-			sendPack(clientSocket, CODE_OK, "Команда обработана.");
+			sendPack(clientSocket, CODE_OK, strlen("Команда обработана.") + 1, "Команда обработана.");
 		}
 	}
 
@@ -358,7 +358,7 @@ int sendListFilesInDir(struct Client client, char *errorString){
 			continue;
 		}
 		strcpy(fname, dirent->d_name);
-		if(sendPack(client.socket, CODE_INFO, fname) == -1){
+		if(sendPack(client.socket, CODE_INFO, strlen(fname) + 1, fname) == -1){
 			fprintf(stdout, "Проблема с отправкой имени файла из директории - %s\n", dirStr);
 			sprintf(errorString, "Не получилось отправить навзание файла из директории - %s", dirStr);
 			return -1;
@@ -388,7 +388,7 @@ int changeClientDir(struct Client *client, char *path, char *errorString){
 	pthread_mutex_unlock(&mutex);
 	if(!strcmp(path, "..")){
 		if(count == 1){
-			sendPack(client->socket, CODE_INFO, "Вы находитесь в корневой директории.");
+			sendPack(client->socket, CODE_INFO, strlen("Вы находитесь в корневой директории.") + 1, "Вы находитесь в корневой директории.");
 		} else {
 			pthread_mutex_lock(&mutex);
 			bzero(client->dir.path[count - 1], sizeof(client->dir.path[count - 1]));
@@ -429,7 +429,7 @@ int changeClientDir(struct Client *client, char *path, char *errorString){
 	}
 	pthread_mutex_unlock(&mutex);
 	strcat(clientDir, "$");
-	sendPack(client->socket, CODE_YOUR_PATH, clientDir);
+	sendPack(client->socket, CODE_YOUR_PATH, strlen(clientDir) + 1, clientDir);
 	return 1;
 }
 
@@ -607,12 +607,11 @@ int validateCommand(struct Command cmd, char *errorString){
 
 
 //TODO исправить пути к фалу на клиенте
-//передача НЕ текстовых файлов
 /**
 Получает файл от клиента.
 */
 int readFile(struct Client client, char *fileName, char *errorString){
-	sendPack(client.socket, CODE_REQUEST_FILE, fileName);
+	sendPack(client.socket, CODE_REQUEST_FILE, strlen(fileName) + 1, fileName);
 
 	char dirStr[SIZE_MSG] = {0};
 	makeDir(client.dir, dirStr);
@@ -635,8 +634,8 @@ int readFile(struct Client client, char *fileName, char *errorString){
 			return -1;
 		}
 		if(package.code == CODE_FILE_SECTION){
-			fwrite(package.data, sizeof(char), strlen(package.data) - 1, file);
-			// fputs(package.data, file);
+			fprintf(stdout, "Пишу байт - %d\n", package.sizeData);
+			fwrite(package.data, sizeof(char), package.sizeData, file);
 		} else if(package.code == CODE_FILE_END){
 			fprintf(stdout, "Файл: %s - получен.\n", fileName);
 			break;
@@ -648,6 +647,6 @@ int readFile(struct Client client, char *fileName, char *errorString){
 		}
 	}
 	fclose(file);
-	sendPack(client.socket, CODE_INFO, "Файл загружен.\n");
+	sendPack(client.socket, CODE_INFO, strlen("Файл загружен.\n") + 1, "Файл загружен.\n");
 	return 1;
 }

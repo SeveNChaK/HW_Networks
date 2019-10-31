@@ -43,6 +43,7 @@
 */
 struct Package {
 	int code;
+	int sizeData;
 	char data[SIZE_MSG];
 };
 

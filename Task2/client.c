@@ -12,7 +12,7 @@
 /*
 ВОПРОСЫ:
 	что если сделать const char *str на входе функции?
-	конкурентный подход обращения к файлам? (копии создавать)
+	конкурентный подход обращения к файлам? (копии создавать) man 2 flock
 	отключение во время передачи файла?
 	ошибки во время передачи файла?
 	обращение в файлам по пути или только по имени в текущей директроии?
@@ -68,7 +68,7 @@ int main(int argc, char** argv) {
 			break;
 		}
 
-		if(sendPack(sock, CODE_CMD, inputBuf) == -1){
+		if(sendPack(sock, CODE_CMD, strlen(inputBuf) + 1, inputBuf) == -1){
 			fprintf(stderr, "Проблемы с отправкой команды на сервер. Соединение разорвано!\n");
 			break;
 		}
@@ -93,7 +93,7 @@ int execCommand(int sock){
 		code = package.code;
 
 		if(code == CODE_ERROR){
-			fprintf(stderr, "Возникла ошибка!\n%s\n", package.data); fflush(stderr);
+			fprintf(stderr, "Возникла ошибка!\n%s\n", package.data);
 		} else if(code == CODE_INFO){
 			fprintf(stdout, "%s\n", package.data);
 		} else if(code == CODE_REQUEST_FILE){
@@ -114,20 +114,19 @@ void sendFile(int sock, char *fileName){
 	FILE *file = fopen(fileName, "rb");
 	fprintf(stdout, "file - %s\n", fileName);
 	if(file == NULL){
-		fprintf(stdout, "Не удалось загрузит файл - %s\n", fileName);
-		sendPack(sock, CODE_CANCEL, "Отмена.");
+		fprintf(stdout, "Не удалось загрузить файл - %s\n", fileName);
+		sendPack(sock, CODE_CANCEL, strlen("Отмена.") + 1, "Отмена.");
 		return;
 	}
 	char section[SIZE_MSG] = {'\0'};
-	// fread(section, sizeof(char), SIZE_MSG, file)
 	int res = 0;
-	while((res = fread(section, sizeof(char), sizeof(section) - 1, file)) != 0){
-		section[res] = '\0';
-		sendPack(sock, CODE_FILE_SECTION, section);
+	while((res = fread(section, sizeof(char), sizeof(section), file)) != 0){
+		fprintf(stdout, "res = %d\n", res);
+		sendPack(sock, CODE_FILE_SECTION, res, section); //TODO обработать ошибку
 		bzero(section, sizeof(section));
 	}
 	fclose(file);
-	sendPack(sock, CODE_FILE_END, "Файл отправлен полностью.");
+	sendPack(sock, CODE_FILE_END, strlen("Файл отправлен полностью.") + 1, "Файл отправлен полностью.");
 }
 
 void readFile(int sock, char *fileName){
