@@ -25,11 +25,8 @@
 #define CODE_FILE_END 103
 #define CODE_OK 200
 #define CODE_ERROR 300
-#define CODE_CANCEL 301
 #define CODE_INFO 400
 #define CODE_YOUR_PATH 401
-
-#define CODE_TEST 6
 
 struct Package {
 	int code;

@@ -115,7 +115,7 @@ void sendFile(int sock, char *fileName){
 	FILE *file = fopen(fileName, "rb");
 	if(file == NULL){
 		fprintf(stderr, "Не удалось загрузить файл - %s\n", fileName);
-		sendPack(sock, CODE_CANCEL, strlen("Отмена.") + 1, "Отмена.");
+		sendPack(sock, CODE_ERROR, strlen("Отмена.") + 1, "Отмена.");
 		return;
 	}
 	char section[SIZE_MSG] = {'\0'};
@@ -147,7 +147,7 @@ void readFile(int sock, char *fileName){
 	FILE *file = fopen(fName, "wb");
 	if(file == NULL){
 		fprintf(stderr, "Не удалось скачать файл - %s\n", fName);
-		sendPack(sock, CODE_CANCEL, strlen("Отмена") + 1, "Отмена");
+		sendPack(sock, CODE_ERROR, strlen("Отмена") + 1, "Отмена");
 		return;
 	}
 

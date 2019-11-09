@@ -51,7 +51,7 @@ void kickAllClients();
 void kickClient(int kickNum);
 void* clientHandler(void* args);
 int readFile(struct Client client, char *fileName, char *errorString);
-int sendFile(struct Client client, char *fileName, char errorString);
+int sendFile(struct Client client, char *fileName, char *errorString);
 int execClientCommand(struct Client *client, char *cmdLine, char *errorString);
 int execServerCommand(char *cmdLine, char *errorString);
 int parseCmd(char *cmdLine, struct Command *cmd, char *errorString);
