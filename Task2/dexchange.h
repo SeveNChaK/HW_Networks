@@ -27,6 +27,7 @@ int readPack(int socket, struct Package *package){
 Входные значения:
 	int socket - сокет-дескрипотр соединения;
 	int code - код отправляемого пакета;
+	int sizeData - количество байт передаваемых данных;
 	char *data - ссылка на строку, которая содержит отправляемые данные.
 Возвращаемое значение:
 	Количество отправленных байт или -1 если возникла ошибка.
@@ -38,7 +39,10 @@ int sendPack(int socket, int code, int sizeData, char *data){
 	package.sizeData = sizeData;
 	memcpy(package.data, data, sizeData);
 	int res = send(socket, &package, sizeof(struct Package), 0);
-	//TODO обработать ошибку
+	if(res < 0 ){
+		fprintf(stderr, "%s\n", "Не удалось отправить пакет!");
+		return -1;
+	}
 	return res;
 }
 

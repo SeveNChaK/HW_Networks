@@ -10,15 +10,6 @@
 #include <regex.h>
 #include <sys/stat.h>
 
-/*
-ВОПРОСЫ:
-	что если сделать const char *str на входе функции?
-	конкурентный подход обращения к файлам? (копии создавать) man 2 flock
-	отключение во время передачи файла?
-	ошибки во время передачи файла?
-	обращение в файлам по пути или только по имени в текущей директроии?
-*/
-
 #include "declaration.h"
 #include "dexchange.h"
 
@@ -82,6 +73,13 @@ int main(int argc, char** argv) {
 	return 0;
 }
 
+/**
+Выполнение команды.
+Входные значения:
+	int sock - соединение с сервером.
+Возвращаемое значение:
+	1 если все хорошо или 0 если надо завершать рабоут клиента.
+*/
 int execCommand(int sock){
 	struct Package package;
 	int code = -1;
@@ -111,6 +109,13 @@ int execCommand(int sock){
 	return 1;
 }
 
+/**
+Проверяет, что находится по данному пути файл или папка.
+Вхоные значения:
+	char *path - путь к каталогу.
+Возвращаемое значение:
+	1 если это файл, 2 если это папка или -1 если что-то не так.
+*/
 int isWho(char *path){
 	struct stat statBuf;
   	if(stat(path, &statBuf) == -1){
@@ -127,7 +132,12 @@ int isWho(char *path){
   	}
 }
 
-//TODO не давать передавать директорию
+/**
+Отправка файла серверу.
+Входные значения:
+	int sock - соединение с сервером;
+	char *fileName - путь к файлу на стороне клиента.
+*/
 void sendFile(int sock, char *fileName){
 	if(isWho(fileName) != 1){
 		fprintf(stderr, "%s - это не файл!", fileName);
@@ -156,6 +166,12 @@ void sendFile(int sock, char *fileName){
 	sendPack(sock, CODE_FILE_END, strlen("Файл отправлен полностью.") + 1, "Файл отправлен полностью.");
 }
 
+/**
+Чтение файла от сервера.
+Входные значения:
+	int sock - соединение с сервером;
+	char *fileName - имя файла.
+*/
 void readFile(int sock, char *fileName){
 	char *sep = "/";
 	char *temp = strtok(fileName, sep);

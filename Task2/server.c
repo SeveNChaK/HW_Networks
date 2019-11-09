@@ -14,12 +14,6 @@
 #include "declaration.h"
 #include "dexchange.h"
 
-/*
-ВОПРОСЫ
-	- Корректность заданого корневого пути?
-	- Отправка картинок и других НЕ текстовых фалов? Как это правильно сделать?
-*/
-
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 
 struct Command {
@@ -60,6 +54,7 @@ int validateCommand(struct Command cmd, char *errorString);
 int sendListFilesInDir(struct Client client, char *errorString);
 void makeDir(struct Path path, char *dirResult);
 int changeClientDir(struct Client *client, char *path, char *errorString);
+int isWho(char *path);
 
 
 int main( int argc, char** argv) {
@@ -255,7 +250,7 @@ void* clientHandler(void* args){
 	ls - отправляет пользоватлею список файлов в директории;
 	cd [DIR] - навигация по директориям;
 	load [FILE_NAME] - загружает файл на сервер;
-	get [FILE_NAME] - отправляет файл пользователю.
+	dload [FILE_NAME] - отправляет файл пользователю.
 Входные значения:
 	struct Client *client - структура, которая содержит информацию о клиенте;
 	char *cmdLine - строка, которая содержит исходную команду;
@@ -285,7 +280,7 @@ int execClientCommand(struct Client *client, char *cmdLine, char *errorString){
 		return changeClientDir(client, cmd.argv[1], errorString);
 	} else if(!strcmp(cmd.argv[0], "load")) {
 		return readFile(clientCopy, cmd.argv[1], errorString); //TODO
-	} else if(!strcmp(cmd.argv[0], "get")){
+	} else if(!strcmp(cmd.argv[0], "dload")){
 		return sendFile(clientCopy, cmd.argv[1], errorString); //TODO
 	} else {
 		sprintf(stderr, "Хоть мы все и проверили, но что-то с ней не так: %s\n", cmdLine);
@@ -294,6 +289,15 @@ int execClientCommand(struct Client *client, char *cmdLine, char *errorString){
 	return 1;
 }
 
+/**
+Отправляет клиенту список файлов и директорий, которые находятся в текущем каталоге.
+Входные значения:
+	struct Client client - информация о клиенте;
+	char *errorString - строка, которое содержит описание ошибки.
+Возвращаемое значение:
+	1 если все хорошо или -1 если произошла ошибка. Описание ошибки содержиться в 
+	переменной errorString.
+*/
 int sendListFilesInDir(struct Client client, char *errorString){
 	char dirStr[SIZE_MSG] = {'\0'};
 	makeDir(client.dir, dirStr);
@@ -325,6 +329,12 @@ int sendListFilesInDir(struct Client client, char *errorString){
 	return 1;
 }
 
+/**
+Собирает полный путь в одну строку.
+Входные значения:
+	sruct Path path - путь к директории;
+	char *dirResult - строка, в которую будет записан путь.
+*/
 void makeDir(struct Path path, char *dirResult){
 	int count = path.count;
 	for(int i = 0; i < count - 1; i++){
@@ -334,6 +344,16 @@ void makeDir(struct Path path, char *dirResult){
 	strcat(dirResult, path.path[count - 1]);
 }
 
+/**
+Изменение директории клиента.
+Входные значения:
+	struct Client *client - информация о клиенте;
+	char *path - целевой каталог;
+	char *errorString - строка, которая содержит описание ошибки.
+Возвращаемое значение:
+	1 если все хорошо или -1 если произошла ошибка. Описание ошибки содержитсья в
+	переменной errorString.
+*/
 int changeClientDir(struct Client *client, char *path, char *errorString){
 	pthread_mutex_lock(&mutex);
 	int count = client->dir.count;
@@ -382,6 +402,13 @@ int changeClientDir(struct Client *client, char *path, char *errorString){
 	return 1;
 }
 
+/**
+Проверяет, что находится по данному пути файл или папка.
+Вхоные значения:
+	char *path - путь к каталогу.
+Возвращаемое значение:
+	1 если это файл, 2 если это папка или -1 если что-то не так.
+*/
 int isWho(char *path){
 	struct stat statBuf;
   	if(stat(path, &statBuf) == -1){
@@ -402,6 +429,7 @@ int isWho(char *path){
 Исполняет полученную команду, внутри себя вызывает функции проверки корретности команд.
 Обрабатываемые собственные команды:
 	/kick [NUMBER] - принудительно отключает клиента;
+	/lclients - список подключенных клиентов;
 	/shutdown - завершает работу сервера.
 Входные значения:
 	char *cmdLine - строка, которая содержит команду;
@@ -533,7 +561,7 @@ int validateCommand(struct Command cmd, char *errorString){
 			sprintf(errorString, "Команда: %s - имеет много или мало аргументов. Воспользуейтесь командой: help\n", cmdLine);
 			return -1;
 		}
-	} else if(!strcmp(firstArg, "get")){
+	} else if(!strcmp(firstArg, "dload")){
 		if(argc != 2){
 			sprintf(errorString, "Команда: %s - имеет много или мало аргументов. Воспользуейтесь командой: help\n", cmdLine);
 			return -1;
@@ -572,6 +600,13 @@ int validateCommand(struct Command cmd, char *errorString){
 
 /**
 Получает файл от клиента.
+Входные значения:
+	struct Client client - информация о клиенте;
+	char *fileName - путь к файлу, на стороне клиента;
+	char *errorString - описание ошибки.
+Возвращаемое значение:
+	1 если все хорошо или -1 если произошла ошибка. Описание ошибки содержиться в
+	переменной errorString.
 */
 int readFile(struct Client client, char *fileName, char *errorString){
 	sendPack(client.socket, CODE_REQUEST_FILE, strlen(fileName) + 1, fileName);
@@ -626,6 +661,16 @@ int readFile(struct Client client, char *fileName, char *errorString){
 	return 1;
 }
 
+/**
+Отправка файла клиенту.
+Входные значения:
+	struct Client client - информация о клиенте;
+	char *fileName - имя файла;
+	char *errorString - описание ошбики.
+Возвращаемое значение:
+	1 если все хорошо или -1 если произошла ошибка. Описание ошибки содержиться в
+	переменной errorString.
+*/
 int sendFile(struct Client client, char *fileName, char *errorString){
 	bzero(errorString, sizeof(errorString));
 	char dirStr[SIZE_MSG] = {0};
