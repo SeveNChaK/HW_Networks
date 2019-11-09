@@ -9,6 +9,7 @@
 #include <string.h>
 #include <regex.h>
 #include <dirent.h>
+#include <sys/stat.h>
 
 #include "declaration.h"
 #include "dexchange.h"
@@ -355,11 +356,8 @@ int changeClientDir(struct Client *client, char *path, char *errorString){
 		strcat(tempPath, "/");
 		strcat(tempPath, path);
 		fprintf(stdout, "вот - %s\n", tempPath);
-		if(mkdir(tempPath) != -1){
-			sprintf(errorString, "Каталога не существует!");
-			if(rmdir(tempPath) == -1){
-				fprintf(stderr, "ВСЕ ПЛОХО!\n");
-			}
+		if(isWho(tempPath) != 2){
+			sprintf(errorString, "%s - это не каталог!", path);
 			return -1;
 		}
 		int err = parsePath(path, &(client->dir), errorString);
@@ -382,6 +380,22 @@ int changeClientDir(struct Client *client, char *path, char *errorString){
 	strcat(clientDir, "$");
 	sendPack(client->socket, CODE_YOUR_PATH, strlen(clientDir) + 1, clientDir);
 	return 1;
+}
+
+int isWho(char *path){
+	struct stat statBuf;
+  	if(stat(path, &statBuf) == -1){
+  		return -1;
+  	}
+  	if(S_ISREG(statBuf.st_mode)){
+  	  return 1;
+  	}else if(S_ISDIR(statBuf.st_mode)){
+  	  return 2;
+  	}else if(S_ISLNK(statBuf.st_mode)){
+  	  return 1;
+  	} else {
+  		return -1;
+  	}
 }
 
 /**
@@ -556,8 +570,6 @@ int validateCommand(struct Command cmd, char *errorString){
 	return 1;
 }
 
-
-//TODO исправить пути к фалу на клиенте
 /**
 Получает файл от клиента.
 */
@@ -615,12 +627,19 @@ int readFile(struct Client client, char *fileName, char *errorString){
 }
 
 int sendFile(struct Client client, char *fileName, char *errorString){
-	sendPack(client.socket, CODE_RESPONSE_FILE, strlen(fileName) + 1, fileName);
-
+	bzero(errorString, sizeof(errorString));
 	char dirStr[SIZE_MSG] = {0};
 	makeDir(client.dir, dirStr);
 	strcat(dirStr, "/");
 	strcat(dirStr, fileName);
+
+	if(isWho(dirStr) != 1){
+		sprintf(errorString, "%s - это не файл!", fileName);
+		printf("AAAAA\n"); fflush(stdout);
+		return -1;
+	}
+
+	sendPack(client.socket, CODE_RESPONSE_FILE, strlen(fileName) + 1, fileName);
 
 	FILE *file = fopen(dirStr, "rb");
 	if(file == NULL){

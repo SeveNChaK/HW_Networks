@@ -8,6 +8,7 @@
 #include <pthread.h>
 #include <string.h>
 #include <regex.h>
+#include <sys/stat.h>
 
 /*
 ВОПРОСЫ:
@@ -110,8 +111,29 @@ int execCommand(int sock){
 	return 1;
 }
 
+int isWho(char *path){
+	struct stat statBuf;
+  	if(stat(path, &statBuf) == -1){
+  		return -1;
+  	}
+  	if(S_ISREG(statBuf.st_mode)){
+  	  return 1;
+  	}else if(S_ISDIR(statBuf.st_mode)){
+  	  return 2;
+  	}else if(S_ISLNK(statBuf.st_mode)){
+  	  return 1;
+  	} else {
+  		return -1;
+  	}
+}
+
 //TODO не давать передавать директорию
 void sendFile(int sock, char *fileName){
+	if(isWho(fileName) != 1){
+		fprintf(stderr, "%s - это не файл!", fileName);
+		sendPack(sock, CODE_ERROR, strlen("Отмена.") + 1, "Отмена.");
+		return;
+	}
 	FILE *file = fopen(fileName, "rb");
 	if(file == NULL){
 		fprintf(stderr, "Не удалось загрузить файл - %s\n", fileName);
