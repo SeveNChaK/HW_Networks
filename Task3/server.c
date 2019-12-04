@@ -18,8 +18,10 @@
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 
 struct Command {
+    int type;
     int argc;
     char argv[MAX_QUANTITY_ARGS_CMD][SIZE_ARG];
+    int lengthCmd;
     char sourceCmdLine[SIZE_CMD];
 };
 
@@ -28,16 +30,21 @@ struct Path{
     char dirs[MAX_QUANTITY_ARGS_CMD][SIZE_ARG];
 };
 
-struct Client {
-    char address[SIZE_MY_STR];
-    int port;
-    struct Path dir;
-    struct Package lastPackage;
-} *clients;
-int clientQuantity = 0;
+struct ConnectInfo {
+    struct Package package;
+    struct sockaddr_in clientInfo;
+};
+
+// struct Client {
+//     char address[SIZE_MY_STR];
+//     int port;
+//     struct sockaddr_in clientInfo;
+//     struct Package lastPackage;
+// };
 char *rootDir;
 
-int main( int argc, char** argv) {
+
+int main(int argc, char** argv) {
 
     if(argc != 3){
         logError("%s\n%s\n", "Неверное количество аргументов!", "Необходим вызов: ./server [PORT] [WORK_PATH]");
@@ -48,6 +55,47 @@ int main( int argc, char** argv) {
     rootDir = argv[2];
     int serverSocket = -1;
     initServerSocket(&serverSocket, port);
+
+    pthread_t *workers;
+    int quantityWorkers = 0;
+
+    struct ConnectInfo connectInfo;
+    while (1) { //ПРИДУМАТЬ КАК ЗАВЕРШАТЬ РАБОТУ СЕРВЕРА (ГЛОБАЛЬНЫЙ ФЛАГ?)
+        // struct Client newClient;
+
+
+        if (readPack(serverSocket, &(connectInfo.clientInfo), &(connectInfo.package)) < 0) { //тут мы получается ждем команду
+            logError("Проблемы с прослушиванием серверного сокета. Необходимо перезапустить сервер!\n");
+            close(serverSocket);
+            exit(1);
+        }
+
+        if (connectInfo.package.id != 1 && connectInfo.package.code != CODE_CONNECT) {
+            logDebug("Получили какой-то не тот пакет в основном потоке. Нам нужен пакет с id = 1.\n");
+            continue;
+        }
+
+        /*
+        Каждый раз при получении команды создается новый поток для ее обработки. После обработки этой
+        команды поток завершается.
+        */
+        //СДЕЛАТЬ ПОИСК ВОРКЕРОВ!!!!ОБЯЗАТЕЛЬНО!!!!
+        //И ТУТ ОПАСНОЕ МЕСТО С ПАМЯТЬЮ МОЖЕТ НЕ УСПЕТЬ СОЗДАТЬСЯ ПОТОК И УЖЕ ПОМЕНЯТЬСЯ ПАМЯТЬ
+        workers = (pthread_t*) realloc(workers, sizeof(pthread_t) * (quantityWorkers + 1));
+        if(pthread_create(&(workers[quantityWorkers]), NULL, asyncTask, (void*) &connectInfo)) {
+            logError("%s\n", "Не удалось создать поток для обработки задачи!");
+            continue;
+        }
+        quantityWorkers++;
+    }
+
+    logInfo("Ожидаем завершения работы воркеров.\n");
+    for (int i = 0; i < quantityWorkers; i++) {
+        pthread_join(workers[i]);
+    }
+
+    close(serverSocket);
+    free(workers);
 
     logInfo("%s\n", "Сервер завершил работу.");    
     return 0;
@@ -62,7 +110,7 @@ int main( int argc, char** argv) {
 */
 void initServerSocket(int *serverSocket, int port){
     struct sockaddr_in servaddr;
-    logInfo("Инициализация сервера...");
+    logInfo("Инициализация сервера...\n");
 
     /* Заполняем структуру для адреса сервера: семейство
     протоколов TCP/IP, сетевой интерфейс – любой, номер порта - 
@@ -95,62 +143,65 @@ void initServerSocket(int *serverSocket, int port){
     logInfo("%s\n", "Инициализация сервера прошла успешно.");
 }
 
+/*
+Создает сокет на рандомном порту.
+*/
+unsigned short initServerSocketWithRandomPort(int *serverSocket){
+    struct sockaddr_in servaddr;
+    logInfo("Инициализация сокета на рандомном порту...\n");
 
-int main() {
-    int sockfd; /* Дескриптор сокета */
-    int clilen, n; /* Переменные для различных длин и количества символов */
-    char line[1000]; /* Массив для принятой и отсылаемой строки */
-    struct sockaddr_in servaddr, cliaddr; /* Структуры для адресов сервера и клиента */
-
-    /* Заполняем структуру для адреса сервера: семейство
-    протоколов TCP/IP, сетевой интерфейс – любой, номер порта 
-    51000. Поскольку в структуре содержится дополнительное не
-    нужное нам поле, которое должно быть нулевым, перед 
-    заполнением обнуляем ее всю */
     bzero(&servaddr, sizeof(servaddr));
     servaddr.sin_family = AF_INET;
-    servaddr.sin_port = htons(51000);
     servaddr.sin_addr.s_addr = htonl(INADDR_ANY);
-
-    /* Создаем UDP сокет */
-    if ((sockfd = socket(PF_INET, SOCK_DGRAM, 0)) < 0) {
-        perror(NULL); /* Печатаем сообщение об ошибке */
+    
+    *serverSocket = socket(AF_INET, SOCK_DGRAM, 0);
+    if (*serverSocket < 0) {
+        logError(stderr, "%s\n", "Не удалось создать сокет на рандомном порту!");
         exit(1);
     }
 
-    /* Настраиваем адрес сокета */
-    if (bind(sockfd, (struct sockaddr *) &servaddr, sizeof(servaddr)) < 0) {
-        perror(NULL);
-        close(sockfd);
+    int resBind = bind(*serverSocket, (struct sockaddr *) &servaddr, sizeof(servaddr));
+    if (resBind < 0 ) {
+        logError("%s\n", "Не удалось выполнить присваивание имени сокету на рандомном порту!");
+        close(serverSocket);
         exit(1);
     }
 
-    while (1) {
-        /* Основной цикл обслуживания*/
-        /* В переменную clilen заносим максимальную длину
-        для ожидаемого адреса клиента */
-        clilen = sizeof(cliaddr);
-        /* Ожидаем прихода запроса от клиента и читаем его. 
-        Максимальная допустимая длина датаграммы – 999 
-        символов, адрес отправителя помещаем в структуру 
-        cliaddr, его реальная длина будет занесена в 
-        переменную clilen */
-        if ((n = recvfrom(sockfd, line, 999, 0, (struct sockaddr *) &cliaddr, &clilen)) < 0) {
-            perror(NULL);
-            close(sockfd);
-            exit(1);
-        }
-        /* Печатаем принятый текст на экране */
-        printf("%s\n", line);
-        /* Принятый текст отправляем обратно по адресу 
-        отправителя */
-        if(sendto(sockfd, line, strlen(line), 0, 
-        (struct sockaddr *) &cliaddr, clilen) < 0){
-            perror(NULL);
-            close(sockfd);
-            exit(1);
-        } /* Уходим ожидать новую датаграмму*/
+    logInfo("%s\n", "Инициализация сокета на рандомном порту прошла успешно.");
+
+    return servaddr.sin_port;
+}
+
+/**
+Функция обрабокти клиента. Вызывается в новом потоке.
+Входные значения:
+    void* args - аргумент переданный в функцию при создании потока.
+        В данном случае сюда приходит int *indexClient - номер клиента.
+Возвращаемое значение:
+    void* - так надо, чтоб вызывать функцию при создании потока.
+*/
+void* asyncTask(void* args) {
+    struct ConnectInfo connectInfo = *((struct ConnectInfo*) args);
+
+    logDebug("Запущена задача клиента IP - %s  PORT - %d.\n", 
+        inet_ntoa(connectInfo.clientInfo.sin_addr), connectInfo.clientInfo.sin_port);
+
+    int tempSocket = -1;
+    unsigned short newPort = initServerSocket(&tempSocket);
+
+    if (safeSendMsg(tempSocket, connectInfo.clientInfo, CODE_CONNECT, &newPort, sizeof(newPort)) < 0) {
+        logError("Запущена задача клиента IP - %s  PORT - %d не выполнена!\n", 
+        inet_ntoa(connectInfo.clientInfo.sin_addr), connectInfo.clientInfo.sin_port);
+        return;
     }
 
-    return 0;
+    logDebug("Соединение должно быть установилось.\n");
+
+    struct sockaddr_in clientInfo; bzero(&clientInfo, sizeof(*clientInfo));
+    struct Command cmd;
+
+    if (safeReadMsg(tempSocket, &clientInfo, &cmd) < 0) {
+        logError("Не смогли считать команду от клиента в задаче!\n");
+        return;
+    }
 }

@@ -1,6 +1,174 @@
 #ifndef DEXCHANGE_H
 #define DEXCHANGE_H
 
+#define QUANTITY_TRY 10
+
+int safeReadMsg(const int socket, const sockaddr_in *clientInfo, const Command *cmd) {
+	bzero(cmd, sizeof(struct Command));
+
+	struct Package package;
+
+	int nextId = 1;
+	int expectedMaxId = 0;
+	int expectedCode = 0;
+	int wrongPack = QUANTITY_TRY;
+	for (;;) { //Ждем первый пакет
+		if (readPack(socket, clientInfo, &package) < 0) {
+            logError("Ошибка при надежном чтении сообщения!\n");
+            return -1;
+        }
+
+        if (package.id == nextId) {
+        	expectedMaxId = package.maxId;
+        	expectedCode = package.code;
+        	break;
+        } else {
+        	if (--wrongPack == 0) {
+        		logError("Получено много неверных пакетов при ожидании первого. 
+        			Предположительно что-то не так с сетью. Сообщение не получено.\n");
+        		return -1;
+        	}
+        }
+	}
+
+	wrongPack = QUANTITY_TRY;
+	for(;;) {
+
+        if (package.maxId == expectedMaxId 
+        	&& package.code == expectedCode 
+        	&& package.id == nextId
+        ) {
+        	cmd->type = package.code;
+        	cmd->lengthCmd += package.lengthData;
+        	strcat(cmd->cmdLine, package.data);
+
+        	package.acc = ACK;
+        	if (sendPack(socket, *clientInfo, package) < 0) {
+        		logError("Ошибка отправки подтверждения!\n");
+            	return -1;
+        	}
+
+        	nextId++;
+        } else if (package.maxId == expectedMaxId 
+        			&& package.code == expectedCode 
+        			&& package.id < nextId
+        ) {
+        	logDebug("Получен ранее полученный пакет!");
+
+        	sendPack(socket, *clientInfo, package);
+
+        	if (--wrongPack == 0) {
+        		logError("Получено много неверных пакетов. 
+        			Предположительно что-то не так с сетью. Сообщение не получено.\n");
+        		return -1;
+        	}
+        } else {
+        	logDebug("Получен не тот пакет!");
+        	if (--wrongPack == 0) {
+        		logError("Получено много неверных пакетов. 
+        			Предположительно что-то не так с сетью. Сообщение не получено.\n");
+        		return -1;
+        	}
+        }
+
+        if (package.id == expectedMaxId) {
+        	break;//ТУТ НАДО ПОДУМАТЬ, ЕСЛИ КЛИЕНТ НЕ ПОЛУЧИТ АК НА ПОСЛЕДНИЙ ПАКЕТ, ТО ЧЕ БУДЕТ
+        	//ВОЗМОЖНО ЭТО ПОФИКСИТСЯ ЕСЛИ МЫДОБАВИ ОЖИДАНИЕ НА ЧТЕНИЕ
+        }
+
+        //СДЕЛАТЬ СЕЛЕКТОМ ТАЙМ-АУТ ПО ВРЕМНИ
+        if (readPack(socket, clientInfo, &package) < 0) {
+            logError("Ошибка при надежном чтении сообщения!\n");
+            return -1;
+        }
+
+    }
+
+    return 1;
+}
+
+int cmpPack(const struct Package pack1, const struct Package pack2) {
+	if (pack1.id == pack2.id
+		&& pack1.maxId == pack2.maxId
+		&& pack1.code == pack2.code
+		&& pack1.lengthData == pack2.lengthData
+		&& !memcmp(pack1.data, pack2.data, SIZE_PACK_DATA)
+	) {
+		return 0;
+	}
+
+	return -1;
+}
+
+int safeSendMsg(const int socket,
+				const struct sockaddr_in clientInfo,
+				const int code,
+				const char *msg,
+				const int lengthMsg
+) {
+	int tempQuantityPacks = lengthMsg / SIZE_PACK_DATA;
+	int lengthLastPack = lengthMsg % SIZE_PACK_DATA;
+	int quantityPacks = tempQuantityPacks;
+	if (lengthLastPack != 0 || tempQuantityPacks == 0) {
+		quantityPacks += 1;
+	}
+
+	int sendedPacks = 0;
+	struct Package currentPackage;
+	struct Package lastPackage;
+	struct sockaddr_in fromClientInfo;
+	bzero(&currentPackage, sizeof(currentPackage));
+	int quantityTry = 10;
+	for (;;) {
+
+		if (currentPackage.id != sendedPacks + 1) { //Проверка на то, что отправляем - старый или новый пакет
+			bzero(&currentPackage, sizeof(currentPackage));
+			currentPackage.acc = NO_ACK;
+			currentPackage.id = sendedPacks + 1;
+			currentPackage.maxId = quantityPacks;
+			currentPackage.code = code;
+			if (currentPackage.id != quantityPacks) {
+				currentPackage.lengthData = SIZE_PACK_DATA;
+				memcpy(currentPackage.data, msg, SIZE_PACK_DATA);
+				msg += SIZE_PACK_DATA;
+			} else {
+				currentPackage.lengthData = lengthLastPack;
+				memcpy(currentPackage.data, msg, lengthLastPack);
+				msg += lengthLastPack;
+			}
+		}
+
+		if (sendPack(socket, clientInfo, currentPackage) < 0) {
+			logError("Ошибка отправки пакета при надежной отправки сообщения!\n");
+			return -1;
+		}
+
+		//СДЕЛАТЬ СЕЛЕКТОМ ТАЙМ-АУТ ПО ВРЕМНИ
+		if (readPack(socket, fromClientInfo, &lastPackage) < 0) {
+			logError("Ошибка при чтении подтверждения!\n");
+			return -1;
+		}
+
+		if (cmpPack(currentPackage, lastPackage) == 0 && lastPackage.ack == ACK) {
+			logDebug("Получено подтверждение.");
+			sendedPacks++;
+			if (sendedPacks > quantityPacks) {
+				logDebug("Сообщение полностью отправлено, и полученно клиентом.");
+				break;
+			}
+		} else {
+			logDebug("Подтверждение не получено, повторная отправка пакета.");
+
+			if (--quantityTry == 0) {
+				logDebug("Слишком много попыток без подтверждения. Возможно проблемы с сетью. Сообщение не отправлено.");
+				return -1;				
+			}
+		}
+	}
+
+	return 1;
+}
+
 /**
 Функция читает команду из сокета-дескриптора. Поток будет заблокирован 
 на этой функции, пока не будет считана команда или пока не произойдет
@@ -11,14 +179,23 @@
 Возвращаемое значение:
 	Количество считанных байт или -1 если не удалось считать команду.
 */
-int readPack(int socket, struct Package *package){
-	bzero(package->data, sizeof(package->data));
-	int result = readN(socket, package, sizeof(struct Package));
-	if(result < 0 ){
-		fprintf(stderr, "%s\n", "Не удалось считать пакет!");
+int readPack(const int socket, const struct sockaddr_in *clientInfo, const struct Package *package){
+	bzero(package, sizeof(struct Package));
+	bzero(clientInfo, sizeof(struct sockaddr_in));
+
+    int clientInfoLen = sizeof(*clientInfo);
+	int result = recvfrom(socket, package, sizeof(struct Package), 0, clientInfo, &clientAddrLen);
+	if (result < 0 ) {
+		logError("%s\n", "Не удалось считать пакет!");
 		return -1;
 	}
-	fprintf(stdout, "Получен пакет:\n\tкод - %d\n\tданные - %s\n", package->code, package->data);
+	logDebug("Получен пакет на сокете %d:\n  ID - %d\n  MAX_ID - %d\n  CODE - %d\n  DATA - %s\n", 
+		socket, package->id, package->maxId, package->code, package->data);
+
+	// strcpy(client->address, inet_ntoa(clientAddr.sin_addr));
+	// client->port = clientAddr.sin_port;
+	// memcpy(client->clientInfo, clientAddr, sizeof(sockaddr_in));
+
 	return result;
 }
 
@@ -26,50 +203,18 @@ int readPack(int socket, struct Package *package){
 Формирует паакет и отправляет его.
 Входные значения:
 	int socket - сокет-дескрипотр соединения;
-	int code - код отправляемого пакета;
-	int sizeData - количество байт передаваемых данных;
-	char *data - ссылка на строку, которая содержит отправляемые данные.
+	struct Package package - пакет.
 Возвращаемое значение:
 	Количество отправленных байт или -1 если возникла ошибка.
 */
-int sendPack(int socket, int code, int sizeData, char *data){
-	struct Package package;
-	bzero(package.data, sizeof(package.data));
-	package.code = code;
-	package.sizeData = sizeData;
-	memcpy(package.data, data, sizeData);
-	int res = send(socket, &package, sizeof(struct Package), 0);
+int sendPack(const int socket, const struct sockaddr_in clientInfo, const struct Package package) {
+	int len = sizeof(clientInfo);
+	int res = sendto(socket, &package, sizeof(struct Package), 0, &clientInfo, &len);
 	if(res < 0 ){
-		fprintf(stderr, "%s\n", "Не удалось отправить пакет!");
+		logError("%s\n", "Не удалось отправить пакет через сокет %d!", socket);
 		return -1;
 	}
 	return res;
-}
-
-/**
-Функиця читает N байт из сокета. Поток будет заблокирован на этой функции, 
-пока не будет считано заданное количество байт или пока не произойдет
-закрытие сокета.
-Входные значения:
-	int socket - сокет-дескриптор, из которого будут считаны данные;
-	char *buf - строка, куда будут считаны данные;
-	int length - количество байт, которое необходимо считать.
-Возвращаемое значение:
-	Количество считанных байт или -1 если не удалось считать данные.
-*/
-int readN(int socket, char* buf, int length){
-	int result = 0;
-	int readedBytes = 0;
-	int sizeMsg = length;
-	while(sizeMsg > 0){
-		readedBytes = recv(socket, buf + result, sizeMsg, 0);
-		if (readedBytes <= 0){
-			return -1;
-		}
-		result += readedBytes;
-		sizeMsg -= readedBytes;
-	}
-	return result;
 }
 
 #endif

@@ -12,13 +12,13 @@
 #define SIZE_MY_STR 500
 #define MAX_QUANTITY_ARGS_CMD 100
 
+#define CODE_CONNECT 100
 #define CODE_CMD 101
-#define CODE_REQUEST_FILE 200
-#define CODE_RESPONSE_FILE 201
-#define CODE_INFO 400
-#define CODE_ERROR 401
-#define CODE_YOUR_PATH 500
-#define CODE_OK 600
+#define CODE_FILE 200
+#define CODE_INFO 300
+#define CODE_WORK_DIR 301
+#define CODE_ERROR 400
+#define CODE_OK 500
 #define NO_ACK 0
 #define ACK 777
 
