@@ -33,10 +33,10 @@ void initServerSocket(int *serverSocket, int port);
 unsigned short initServerSocketWithRandomPort(int *serverSocket);
 void* asyncTask(void* args);
 int execClientCommand(const int socket, const struct sockaddr_in *clientInfo, const struct Message *msg, const char *errorString);
-int parseCmd(const struct Message *msg, const char *errorString);
+int parseCmd(struct Message *msg, const char *errorString);
 int validateCommand(const struct Message msg, const char *errorString);
 int checkRegEx(const char *str, const char *mask);
-int sendListFilesInDir(const int socket, const struct sockaddr_in *clientInfo, char *errorString);
+int sendListFilesInDir(const int socket, const struct sockaddr_in *clientInfo, const char *path, char *errorString);
 int changeClientDir(const int socket, const struct sockaddr_in *clientInfo, const char *path, const char *errorString);
 int readFile(const int socket, const struct sockaddr_in *client, const char *fileName, const char *errorString);
 int sendFile(const int socket, const struct sockaddr_in *client, const char *fileName, char *errorString);
@@ -86,7 +86,7 @@ int main(int argc, char** argv) {
 
     logInfo("Ожидаем завершения работы воркеров.\n");
     for (int i = 0; i < quantityWorkers; i++) {
-        pthread_join(workers[i]);
+        pthread_join(workers[i], NULL);
     }
 
     close(serverSocket);
@@ -182,7 +182,7 @@ void* asyncTask(void* args) {
         inet_ntoa(connectInfo.clientInfo.sin_addr), connectInfo.clientInfo.sin_port);
 
     int tempSocket = -1;
-    unsigned short newPort = initServerSocket(&tempSocket);
+    unsigned short newPort = initServerSocketWithRandomPort(&tempSocket);
 
     if (safeSendMsg(tempSocket, connectInfo.clientInfo, CODE_CONNECT, &newPort, sizeof(newPort)) < 0) {
         logError("Запущена задача клиента IP - %s  PORT - %d не выполнена!\n", 
@@ -192,7 +192,7 @@ void* asyncTask(void* args) {
 
     logDebug("Соединение должно быть установилось.\n");
 
-    struct sockaddr_in clientInfo; bzero(&clientInfo, sizeof(*clientInfo));
+    struct sockaddr_in clientInfo; bzero(&clientInfo, sizeof(clientInfo));
     struct Message msg;
 
     if (safeReadMsg(tempSocket, &clientInfo, &msg) < 0) {
@@ -201,7 +201,7 @@ void* asyncTask(void* args) {
     }
 
     char errorString[SIZE_PACK_DATA] = { 0 };
-    if (execClientCommand(socket, clientInfo, &msg, errorString) == -1) {
+    if (execClientCommand(socket, &clientInfo, &msg, errorString) == -1) {
         logDebug("Ошибка обработки команды клиента!\n");
         
         if (safeSendMsg(tempSocket, clientInfo, CODE_ERROR, &errorString, sizeof(errorString)) < 0) {
@@ -209,7 +209,7 @@ void* asyncTask(void* args) {
             return;
         }
     } else {
-        logDebug("Команда обработана!\n")
+        logDebug("Команда обработана!\n");
 
         if (safeSendMsg(tempSocket, clientInfo, CODE_OK, "OK", 2) < 0) {
             logError("Не смогли отправить сообщение усешной обработки команды!\n");
@@ -230,11 +230,11 @@ int execClientCommand(const int socket, const struct sockaddr_in *clientInfo, co
         return -1;
     }
 
-    logDebug("Команда клиента: %s - корректна.\n", msg.data);
+    logDebug("Команда клиента: %s - корректна.\n", msg->data);
     
     
     if(!strcmp(msg->argv[0], "/ls")) {
-        return sendListFilesInDir(socket, clientInfo, errorString);
+        return sendListFilesInDir(socket, clientInfo, msg->argv[1], errorString);
     } else if(!strcmp(msg->argv[0], "/cd")) {
         return changeClientDir(socket, clientInfo, msg->argv[1], errorString);
     } else if(!strcmp(msg->argv[0], "/load")) {
@@ -249,7 +249,7 @@ int execClientCommand(const int socket, const struct sockaddr_in *clientInfo, co
     return 1;
 }
 
-int parseCmd(const struct Message *msg, const char *errorString) {
+int parseCmd(struct Message *msg, const char *errorString) {
     bzero(errorString, sizeof(errorString));
 
     int countArg = 0;
@@ -287,7 +287,7 @@ int validateCommand(const struct Message msg, const char *errorString) {
     char *cmdLine = msg.data;
 
     if (!strcmp(firstArg, "/ls")) {
-        if (argc != 1) {
+        if (argc != 2) {
             sprintf(errorString, "Команда: %s - имеет лишние аргументы. Воспользуейтесь командой: help\n", msg.data);
             return -1;
         }
@@ -348,86 +348,71 @@ int checkRegEx(const char *str, const char *mask) {
     return 0;
 }
 
-int sendListFilesInDir(const int socket, const struct sockaddr_in *clientInfo, char *errorString) {
-    char dirStr[SIZE_MSG] = {'\0'};
-    makeDir(client.dir, dirStr);
-    DIR *dir = opendir(dirStr);
-    if(dir == NULL){
-        logDebug("Не смог открыть директорию - %s\n", dirStr);
-        sprintf(errorString, "Не удалось получить список файлов из директории - %s. Возможно она не существует.\n", dirStr);
+int sendListFilesInDir(const int socket, const struct sockaddr_in *clientInfo, const char *path, char *errorString) {
+    bzero(errorString,sizeof(errorString));
+
+    DIR *dir = opendir(path);
+    if (dir == NULL) {
+        logDebug("Не смог открыть директорию - %s\n", path);
+        sprintf(errorString, "Не удалось получить список файлов из директории - %s. Возможно она не существует.\n", path);
         return -1;
     }
 
     struct dirent *dirent;
-    char fname[SIZE_MSG] = {0};
     while ((dirent = readdir(dir)) != NULL) {
         if (dirent->d_name[0] == '.') {
             continue;
         }
-
-        strcpy(fname, dirent->d_name);
         
-        if (safeSendMsg(socket, clientInfo, CODE_INFO, fname, strlen(fname)) == -1) {
-            logDebug("Проблема с отправкой имени файла из директории - %s\n", dirStr);
-            sprintf(errorString, "Не получилось отправить навзание файла из директории - %s", dirStr);
+        if (safeSendMsg(socket, *clientInfo, CODE_INFO, dirent->d_name, strlen(dirent->d_name)) == -1) {
+            logDebug("Проблема с отправкой имени файла из директории - %s\n", path);
+            sprintf(errorString, "Не получилось отправить навзание файла из директории - %s", path);
             return -1;
         }
-
-        bzero(fname, sizeof(fname));
     }
 
-    if (closedir(dir) == -1) {
-        logDebug("Беда! Не могу закрыть директорию - %s", dirStr);
+    if (closedir(path) == -1) {
+        logDebug("Беда! Не могу закрыть директорию - %s\n", path);
+        sprintf(errorString, "Проблемы с директорией! - %s", path);
         return -1;
     }
 
     return 1;
 }
 
-//TODO
 int changeClientDir(const int socket, const struct sockaddr_in *clientInfo, const char *path, const char *errorString) {
-    // if(!strcmp(path, "..")){
-    //     if(count == 1){
-    //         sendPack(client->socket, CODE_INFO, strlen("Вы находитесь в корневой директории.") + 1, "Вы находитесь в корневой директории.");
-    //     } else {
-    //         pthread_mutex_lock(&mutex);
-    //         bzero(client->dir.path[count - 1], sizeof(client->dir.path[count - 1]));
-    //         client->dir.count--;
-    //         pthread_mutex_unlock(&mutex);
-    //     }
-    // } else {
-    //     char tempPath[SIZE_MSG] = {0};
-    //     pthread_mutex_lock(&mutex);
-    //     struct Path t = client->dir;
-    //     pthread_mutex_unlock(&mutex);
-    //     makeDir(t, tempPath);
-    //     strcat(tempPath, "/");
-    //     strcat(tempPath, path);
-    //     fprintf(stdout, "вот - %s\n", tempPath);
-    //     if(isWho(tempPath) != 2){
-    //         sprintf(errorString, "%s - это не каталог!", path);
-    //         return -1;
-    //     }
-    //     int err = parsePath(path, &(client->dir), errorString);
-    //     if(err == -1){
-    //         return -1;
-    //     }
-    // }
-    // char clientDir[SIZE_MSG] = {0};
-    // strcat(clientDir, "~/");
-    // pthread_mutex_lock(&mutex);
-    // count = client->dir.count;
-    // if(count > 1){
-    //     for(int i = 1; i < count - 1; i++){
-    //         strcat(clientDir, client->dir.path[i]);
-    //         strcat(clientDir, "/");
-    //     }
-    //     strcat(clientDir, client->dir.path[count - 1]);
-    // }
-    // pthread_mutex_unlock(&mutex);
-    // strcat(clientDir, "$");
-    // sendPack(client->socket, CODE_YOUR_PATH, strlen(clientDir) + 1, clientDir);
+
+    logDebug("Целевая директория - %s\n", path);
+
+    if(isWho(path) != 2){
+        sprintf(errorString, "%s - это не каталог! Или такого каталога не существует.", path);
+        return -1;
+    }
+
     return 1;
+}
+
+/**
+Проверяет, что находится по данному пути файл или папка.
+Вхоные значения:
+    char *path - путь к каталогу.
+Возвращаемое значение:
+    1 если это файл, 2 если это папка или -1 если что-то не так.
+*/
+int isWho(char *path){
+    struct stat statBuf;
+    if(stat(path, &statBuf) == -1){
+        return -1;
+    }
+    if(S_ISREG(statBuf.st_mode)){
+      return 1;
+    }else if(S_ISDIR(statBuf.st_mode)){
+      return 2;
+    }else if(S_ISLNK(statBuf.st_mode)){
+      return 1;
+    } else {
+        return -1;
+    }
 }
 
 int readFile(const int socket, const struct sockaddr_in *clientInfo, const char *fileName, const char *errorString) {

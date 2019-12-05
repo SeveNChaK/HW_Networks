@@ -3,7 +3,7 @@
 
 #define QUANTITY_TRY 10
 
-int safeReadMsg(const int socket, const sockaddr_in *clientInfo, const Message *msg) {
+int safeReadMsg(const int socket, const struct sockaddr_in *clientInfo, struct Message *msg) {
 	bzero(msg, sizeof(struct Message));
 
 	struct Package package;
@@ -41,7 +41,7 @@ int safeReadMsg(const int socket, const sockaddr_in *clientInfo, const Message *
         	msg->length += package.lengthData;
         	strcat(msg->data, package.data);
 
-        	package.acc = ACK;
+        	package.ack = ACK;
         	if (sendPack(socket, *clientInfo, package) < 0) {
         		logError("Ошибка отправки подтверждения!\n");
             	return -1;
@@ -110,7 +110,7 @@ int safeSendMsg(const int socket,
 
 		if (currentPackage.id != sendedPacks + 1) { //Проверка на то, что отправляем - старый или новый пакет
 			bzero(&currentPackage, sizeof(currentPackage));
-			currentPackage.acc = NO_ACK;
+			currentPackage.ack = NO_ACK;
 			currentPackage.id = sendedPacks + 1;
 			currentPackage.maxId = quantityPacks;
 			currentPackage.code = code;
@@ -171,7 +171,7 @@ int readPack(const int socket, const struct sockaddr_in *clientInfo, const struc
 	bzero(clientInfo, sizeof(struct sockaddr_in));
 
     int clientInfoLen = sizeof(*clientInfo);
-	int result = recvfrom(socket, package, sizeof(struct Package), 0, clientInfo, &clientAddrLen);
+	int result = recvfrom(socket, package, sizeof(struct Package), 0, clientInfo, &clientInfoLen);
 	if (result < 0 ) {
 		logError("%s\n", "Не удалось считать пакет!");
 		return -1;
