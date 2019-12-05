@@ -3,8 +3,8 @@
 
 #define QUANTITY_TRY 10
 
-int safeReadMsg(const int socket, const sockaddr_in *clientInfo, const Command *cmd) {
-	bzero(cmd, sizeof(struct Command));
+int safeReadMsg(const int socket, const sockaddr_in *clientInfo, const Message *msg) {
+	bzero(msg, sizeof(struct Message));
 
 	struct Package package;
 
@@ -24,8 +24,7 @@ int safeReadMsg(const int socket, const sockaddr_in *clientInfo, const Command *
         	break;
         } else {
         	if (--wrongPack == 0) {
-        		logError("Получено много неверных пакетов при ожидании первого. 
-        			Предположительно что-то не так с сетью. Сообщение не получено.\n");
+        		logError("Получено много неверных пакетов при ожидании первого. Предположительно что-то не так с сетью. Сообщение не получено.\n");
         		return -1;
         	}
         }
@@ -38,9 +37,9 @@ int safeReadMsg(const int socket, const sockaddr_in *clientInfo, const Command *
         	&& package.code == expectedCode 
         	&& package.id == nextId
         ) {
-        	cmd->type = package.code;
-        	cmd->lengthCmd += package.lengthData;
-        	strcat(cmd->cmdLine, package.data);
+        	msg->type = package.code;
+        	msg->length += package.lengthData;
+        	strcat(msg->data, package.data);
 
         	package.acc = ACK;
         	if (sendPack(socket, *clientInfo, package) < 0) {
@@ -49,31 +48,19 @@ int safeReadMsg(const int socket, const sockaddr_in *clientInfo, const Command *
         	}
 
         	nextId++;
-        } else if (package.maxId == expectedMaxId 
-        			&& package.code == expectedCode 
-        			&& package.id < nextId
-        ) {
-        	logDebug("Получен ранее полученный пакет!");
+        } else {
+        	logDebug("Получен не верный пакет!");
 
         	sendPack(socket, *clientInfo, package);
 
         	if (--wrongPack == 0) {
-        		logError("Получено много неверных пакетов. 
-        			Предположительно что-то не так с сетью. Сообщение не получено.\n");
-        		return -1;
-        	}
-        } else {
-        	logDebug("Получен не тот пакет!");
-        	if (--wrongPack == 0) {
-        		logError("Получено много неверных пакетов. 
-        			Предположительно что-то не так с сетью. Сообщение не получено.\n");
+        		logError("Получено много неверных пакетов. Предположительно что-то не так с сетью. Сообщение не получено.\n");
         		return -1;
         	}
         }
 
         if (package.id == expectedMaxId) {
-        	break;//ТУТ НАДО ПОДУМАТЬ, ЕСЛИ КЛИЕНТ НЕ ПОЛУЧИТ АК НА ПОСЛЕДНИЙ ПАКЕТ, ТО ЧЕ БУДЕТ
-        	//ВОЗМОЖНО ЭТО ПОФИКСИТСЯ ЕСЛИ МЫДОБАВИ ОЖИДАНИЕ НА ЧТЕНИЕ
+        	break;
         }
 
         //СДЕЛАТЬ СЕЛЕКТОМ ТАЙМ-АУТ ПО ВРЕМНИ
@@ -189,12 +176,9 @@ int readPack(const int socket, const struct sockaddr_in *clientInfo, const struc
 		logError("%s\n", "Не удалось считать пакет!");
 		return -1;
 	}
+
 	logDebug("Получен пакет на сокете %d:\n  ID - %d\n  MAX_ID - %d\n  CODE - %d\n  DATA - %s\n", 
 		socket, package->id, package->maxId, package->code, package->data);
-
-	// strcpy(client->address, inet_ntoa(clientAddr.sin_addr));
-	// client->port = clientAddr.sin_port;
-	// memcpy(client->clientInfo, clientAddr, sizeof(sockaddr_in));
 
 	return result;
 }

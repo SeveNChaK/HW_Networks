@@ -7,7 +7,7 @@
 */
 #define SIZE_PACK 500
 #define SIZE_PACK_DATA 480
-#define SIZE_CMD 5000 //в linux длина пути и имени файла ограничена, тут даже с запасом хватит
+#define SIZE_MSG 5000 //в linux длина пути и имени файла ограничена, тут даже с запасом хватит
 #define SIZE_ARG 255
 #define SIZE_MY_STR 500
 #define MAX_QUANTITY_ARGS_CMD 100
@@ -29,6 +29,14 @@ struct Package {
 	int code;
 	int lengthData;
 	char data[SIZE_PACK_DATA];
+};
+
+struct Message {
+    int type;
+    int length;
+    char data[SIZE_MSG];
+    int argc;
+    char argv[MAX_QUANTITY_ARGS_CMD][SIZE_ARG];
 };
 
 #endif
