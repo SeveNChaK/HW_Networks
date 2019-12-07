@@ -13,6 +13,8 @@ int safeReadMsg(const int socket, const struct sockaddr_in *clientInfo, struct M
 	int expectedCode = 0;
 	int wrongPack = QUANTITY_TRY;
 	for (;;) { //Ждем первый пакет
+
+		//СДЕЛАТЬ СЕЛЕКТОМ ТАЙМ-АУТ ПО ВРЕМНИ
 		if (readPack(socket, clientInfo, &package) < 0) {
             logError("Ошибка при надежном чтении сообщения!\n");
             return -1;
@@ -44,23 +46,27 @@ int safeReadMsg(const int socket, const struct sockaddr_in *clientInfo, struct M
         	package.ack = ACK;
         	if (sendPack(socket, *clientInfo, package) < 0) {
         		logError("Ошибка отправки подтверждения!\n");
-            	return -1;
+           		return -1;
+        	}
+
+        	if (package.id == expectedMaxId) {
+        		break;
         	}
 
         	nextId++;
         } else {
         	logDebug("Получен не верный пакет!");
 
-        	sendPack(socket, *clientInfo, package);
-
         	if (--wrongPack == 0) {
         		logError("Получено много неверных пакетов. Предположительно что-то не так с сетью. Сообщение не получено.\n");
         		return -1;
         	}
-        }
 
-        if (package.id == expectedMaxId) {
-        	break;
+        	package.ack = ACK;
+        	if (sendPack(socket, *clientInfo, package) < 0) {
+        		logError("Ошибка отправки подтверждения!\n");
+           		return -1;
+        	}
         }
 
         //СДЕЛАТЬ СЕЛЕКТОМ ТАЙМ-АУТ ПО ВРЕМНИ
