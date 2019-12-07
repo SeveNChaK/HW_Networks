@@ -10,7 +10,7 @@
 #define SIZE_MSG 5000 //в linux длина пути и имени файла ограничена, тут даже с запасом хватит
 #define SIZE_ARG 255
 #define SIZE_MY_STR 500
-#define MAX_QUANTITY_ARGS_CMD 100
+#define MAX_QUANTITY_ARGS_CMD 19
 
 #define CODE_CONNECT 100
 #define CODE_CMD 101

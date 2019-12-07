@@ -6,82 +6,80 @@
 #include <stdio.h>
 #include <errno.h>
 #include <unistd.h>
+#include <stdarg.h>
+
+#include "logger.h"
+#include "declaration.h"
+#include "dexchange.h"
+
+struct Path{
+    int argc;
+    char dirs[MAX_QUANTITY_ARGS_CMD][SIZE_ARG];
+    char pathLine[SIZE_MSG];
+} workDir;
+
+struct sockaddr_in serverInfo;
+char preDir[SIZE_MSG];
 
 int main(int argc, char **argv) {
-    int sockfd; /* Дескриптор сокета */
-    int n, len; /* Переменные для различных длин и количества символов */
-    char sendline[1000], recvline[1000]; /* Массивы для отсылаемой и принятой строки */
-    struct sockaddr_in servaddr, cliaddr; /* Структуры дляадресов сервера и клиента */
 
-    /* Сначала проверяем наличие второго аргумента в 
-    командной строке. При его отсутствии ругаемся и прекращаем 
-    работу */
-    if(argc != 2){
-        printf("Usage: a.out <IP address>\n");
+    if(argc != 3){
+        logError("%s\n%s\n", "Неверное количество аргументов!", "Необходим вызов: ./client [IP] [PORT]");
+        exit(1);
+    }
+    char *ip = (char *) argv[1];
+    int port = *((int*) argv[2]);
+
+    bzero(&serverInfo, sizeof(serverInfo));
+    serverInfo.sin_family = AF_INET;
+    serverInfo.sin_addr.s_addr = inet_addr(ip); 
+    serverInfo.sin_port = htons(port);
+
+
+    int sock = -1;
+    sock = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sock == -1) {
+        logError("Не удалось создать сокет! Приложение не запущено.\n");
         exit(1);
     }
 
-    /* Создаем UDP сокет */
-    if((sockfd = socket(PF_INET, SOCK_DGRAM, 0)) < 0){
-        perror(NULL); /* Печатаем сообщение об ошибке */
+    struct sockaddr_in myInfo;
+    bzero(&myInfo, sizeof(myInfo));
+    serverInfo.sin_family = AF_INET;
+    serverInfo.sin_addr.s_addr = inet_addr(INADDR_ANY); 
+
+    if (bind(sock, (struct sockaddr*) &myInfo, sizeof(myInfo)) < 0) {
+        logError("Не удалось настроить адрес сокета! Приложение не запущено.\n");
+        close(sock);
         exit(1);
     }
 
-    /* Заполняем структуру для адреса клиента: семейство 
-    протоколов TCP/IP, сетевой интерфейс – любой, номер порта 
-    по усмотрению операционной системы. Поскольку в структуре
-    содержится дополнительное не нужное нам поле, которое 
-    должно быть нулевым, перед заполнением обнуляем ее всю */
-    bzero(&cliaddr, sizeof(cliaddr));
-    cliaddr.sin_family = AF_INET;
-    cliaddr.sin_port = htons(0);
-    cliaddr.sin_addr.s_addr = htonl(INADDR_ANY);
+    bzero(preDir, sizeof(preDir));
+    strcpy(preDir, "~$");
 
-    /* Настраиваем адрес сокета */
-    if (bind(sockfd, (struct sockaddr *) &cliaddr, sizeof(cliaddr)) < 0) {
-        perror(NULL);
-        close(sockfd); /* По окончании работы закрываем дескриптор сокета */
-        exit(1);
+    char inputBuf[SIZE_MSG];
+    for (;;) {
+        fprintf(stdout, "%s", preDir);
+        bzero(inputBuf, sizeof(inputBuf));
+        fgets(inputBuf, sizeof(inputBuf), stdin);
+        inputBuf[strlen(inputBuf) - 1] = '\0';
+
+        if (!strcmp("/quit", inputBuf)) {
+            break;
+        }
+
+        if (safeSendMsg(sock, serverInfo, CODE_CONNECT, "CONNECT", strlen("CONNECT")) == -1){
+            logError("Проблемы с отправкой команды на сервер. Соединение разорвано!\n");
+            break;
+        }
+
+        if (execCommand(sock) == 0) {
+            break;
+        }
     }
 
-    /* Заполняем структуру для адреса сервера: 
-    семейство протоколов TCP/IP, сетевой интерфейс – из аргумента
-    командной строки, номер порта 7. Поскольку в 
-    структуре содержится дополнительное не нужное нам
-    поле, которое должно быть нулевым, перед заполнением
-    обнуляем ее всю */
-    bzero(&servaddr, sizeof(servaddr));
-    servaddr.sin_family = AF_INET;
-    servaddr.sin_port = htons(7);
-    if (inet_aton(argv[1], &servaddr.sin_addr) == 0) {
-        printf("Invalid IP address\n");
-        close(sockfd); /* По окончании работы закрываем 
-            дескриптор сокета */
-        exit(1);
-    }
+    close(sock;)
+    logInfo("Приложение завершило свою работу. До скорой встречи!");
 
-    /* Вводим строку, которую отошлем серверу */
-    printf("String => ");
-    fgets(sendline, 1000, stdin);
-
-    /* Отсылаем датаграмму */
-    if (sendto(sockfd, sendline, strlen(sendline)+1, 0, (struct sockaddr *) &servaddr, sizeof(servaddr)) < 0) {
-    perror(NULL);
-    close(sockfd);
-    exit(1);
-    }
-
-    /* Ожидаем ответа и читаем его. Максимальная 
-    допустимая длина датаграммы – 1000 символов, 
-    адрес отправителя нам не нужен */
-    if ((n = recvfrom(sockfd, recvline, 1000, 0, (struct sockaddr *) NULL, NULL)) < 0) {
-        perror(NULL);
-        close(sockfd);
-        exit(1);
-    }
-
-    /* Печатаем пришедший ответ и закрываем сокет */
-    printf("%s\n", recvline);
-    close(sockfd);
     return 0;
 }

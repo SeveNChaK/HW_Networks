@@ -4,6 +4,7 @@
 #define QUANTITY_TRY 10
 
 int safeReadMsg(const int socket, const struct sockaddr_in *clientInfo, struct Message *msg) {
+	bzero(msg, sizeof(clientInfo));
 	bzero(msg, sizeof(struct Message));
 
 	struct Package package;
@@ -113,6 +114,7 @@ int safeSendMsg(const int socket,
 	bzero(&currentPackage, sizeof(currentPackage));
 	int quantityTry = 10;
 	for (;;) {
+		bzero(&lastPackage, sizeof(lastPackage));
 
 		if (currentPackage.id != sendedPacks + 1) { //Проверка на то, что отправляем - старый или новый пакет
 			bzero(&currentPackage, sizeof(currentPackage));
