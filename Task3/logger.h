@@ -7,79 +7,92 @@
 
 void logDebug(const char *format, ...) {
 	if (LOG_DEBUG_ON == 1) {
-		fprintf(stdout, format, ...);
+		int d; 
+  		char *str;
+  		va_list factor;
+  		va_start(factor, format);
+
+  		for (char *c = format; *c; c++) {
+  		    if (*c != '%') {
+  		    	fprintf(stdout, "%c", c);
+  		        continue;
+  		    }
+
+  		    switch (*++c) {
+  		        case 'd': 
+  		            d = va_arg(factor, int);
+  		            fprintf(stdout, "%d", d);
+  		            break;
+  		        case 's': 
+  		            str = va_arg(factor, char*);
+  		            fprintf(stdout, "%s", str);
+  		            break;
+  		        default:
+  		            fprintf(stdout, "%c", c);
+  		    }
+  		}
+  		va_end(factor);
 	}
 }
 
 void logInfo(const char *format, ...) {
 	if (LOG_INFO_ON == 1) {
-		fprintf(stdout, format, ...);
+		int d; 
+  		char *str;
+  		va_list factor;
+  		va_start(factor, format);
+
+  		for (char *c = format; *c; c++) {
+  		    if (*c != '%') {
+  		    	fprintf(stdout, "%c", c);
+  		        continue;
+  		    }
+
+  		    switch (*++c) {
+  		        case 'd': 
+  		            d = va_arg(factor, int);
+  		            fprintf(stdout, "%d", d);
+  		            break;
+  		        case 's': 
+  		            str = va_arg(factor, char*);
+  		            fprintf(stdout, "%s", str);
+  		            break;
+  		        default:
+  		            fprintf(stdout, "%c", c);
+  		    }
+  		}
+  		va_end(factor);
 	}
 }
 
 void logError(const char *format, ...) {
 	if (LOG_ERROR_ON == 1) {
-		fprintf(stderr, format, ...);
+		int d; 
+  		char *str;
+  		va_list factor;
+  		va_start(factor, format);
+
+  		for (char *c = format; *c; c++) {
+  		    if (*c != '%') {
+  		    	fprintf(stderr, "%c", c);
+  		        continue;
+  		    }
+
+  		    switch (*++c) {
+  		        case 'd': 
+  		            d = va_arg(factor, int);
+  		            fprintf(stderr, "%d", d);
+  		            break;
+  		        case 's': 
+  		            str = va_arg(factor, char*);
+  		            fprintf(stderr, "%s", str);
+  		            break;
+  		        default:
+  		            fprintf(stderr, "%c", c);
+  		    }
+  		}
+  		va_end(factor);
 	}
-}
-
-int main() {
-    int sockfd; /* Дескриптор сокета */
-    int clilen, n; /* Переменные для различных длин и количества символов */
-    char line[1000]; /* Массив для принятой и отсылаемой строки */
-    struct sockaddr_in servaddr, cliaddr; /* Структуры для адресов сервера и клиента */
-
-    /* Заполняем структуру для адреса сервера: семейство
-    протоколов TCP/IP, сетевой интерфейс – любой, номер порта 
-    51000. Поскольку в структуре содержится дополнительное не
-    нужное нам поле, которое должно быть нулевым, перед 
-    заполнением обнуляем ее всю */
-    bzero(&servaddr, sizeof(servaddr));
-    servaddr.sin_family = AF_INET;
-    servaddr.sin_port = htons(51000);
-    servaddr.sin_addr.s_addr = htonl(INADDR_ANY);
-
-    /* Создаем UDP сокет */
-    if ((sockfd = socket(PF_INET, SOCK_DGRAM, 0)) < 0) {
-        perror(NULL); /* Печатаем сообщение об ошибке */
-        exit(1);
-    }
-
-    /* Настраиваем адрес сокета */
-    if (bind(sockfd, (struct sockaddr *) &servaddr, sizeof(servaddr)) < 0) {
-        perror(NULL);
-        close(sockfd);
-        exit(1);
-    }
-
-    while (1) {
-        /* Основной цикл обслуживания*/
-        /* В переменную clilen заносим максимальную длину
-        для ожидаемого адреса клиента */
-        clilen = sizeof(cliaddr);
-        /* Ожидаем прихода запроса от клиента и читаем его. 
-        Максимальная допустимая длина датаграммы – 999 
-        символов, адрес отправителя помещаем в структуру 
-        cliaddr, его реальная длина будет занесена в 
-        переменную clilen */
-        if ((n = recvfrom(sockfd, line, 999, 0, (struct sockaddr *) &cliaddr, &clilen)) < 0) {
-            perror(NULL);
-            close(sockfd);
-            exit(1);
-        }
-        /* Печатаем принятый текст на экране */
-        printf("%s\n", line);
-        /* Принятый текст отправляем обратно по адресу 
-        отправителя */
-        if(sendto(sockfd, line, strlen(line), 0, 
-        (struct sockaddr *) &cliaddr, clilen) < 0){
-            perror(NULL);
-            close(sockfd);
-            exit(1);
-        } /* Уходим ожидать новую датаграмму*/
-    }
-
-    return 0;
 }
 
 #endif
