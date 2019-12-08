@@ -56,7 +56,7 @@ int safeReadMsg(const int socket, const struct sockaddr_in *clientInfo, struct M
 
         	nextId++;
         } else {
-        	logDebug("Получен не верный пакет!");
+        	logDebug("Получен не верный пакет!\n");
 
         	if (--wrongPack == 0) {
         		logError("Получено много неверных пакетов. Предположительно что-то не так с сетью. Сообщение не получено.\n");
@@ -112,7 +112,7 @@ int safeSendMsg(const int socket,
 	struct Package lastPackage;
 	struct sockaddr_in fromClientInfo;
 	bzero(&currentPackage, sizeof(currentPackage));
-	int quantityTry = 10;
+	int quantityTry = QUANTITY_TRY;
 	for (;;) {
 		bzero(&lastPackage, sizeof(lastPackage));
 
@@ -145,17 +145,21 @@ int safeSendMsg(const int socket,
 		}
 
 		if (cmpPack(currentPackage, lastPackage) == 0 && lastPackage.ack == ACK) {
-			logDebug("Получено подтверждение.");
+			logDebug("Получено подтверждение.\n");
 			sendedPacks++;
 			if (sendedPacks > quantityPacks) {
-				logDebug("Сообщение полностью отправлено, и полученно клиентом.");
+				logDebug("Сообщение полностью отправлено, и полученно клиентом.\n");
 				break;
 			}
+		} else if (currentPackage.id == 1) {
+			logDebug("Начало приходить уже новое сообщение, значит клиент получил предыдущее сообщение.\n");
+			logDebug("Пропустим его, а потом клиент еще раз пошлет =)\n");
+			break;
 		} else {
-			logDebug("Подтверждение не получено, повторная отправка пакета.");
+			logDebug("Подтверждение не получено, повторная отправка пакета.\n");
 
 			if (--quantityTry == 0) {
-				logDebug("Слишком много попыток без подтверждения. Возможно проблемы с сетью. Сообщение не отправлено.");
+				logDebug("Слишком много попыток без подтверждения. Возможно проблемы с сетью. Сообщение не отправлено.\n");
 				return -1;				
 			}
 		}
