@@ -40,7 +40,7 @@ int sendFile(const int socket, const struct sockaddr_in *client, const char *fil
 int main(int argc, char** argv) {
 
     if(argc != 3){
-        logError("%s\n%s\n", "Неверное количество аргументов!", "Необходим вызов: ./server [PORT] [WORK_PATH]");
+        fprintf(stdout,"%s\n%s\n", "Неверное количество аргументов!", "Необходим вызов: ./server [PORT] [WORK_PATH]");
         exit(1);
     }
 
@@ -57,13 +57,13 @@ int main(int argc, char** argv) {
     while (1) { //ПРИДУМАТЬ КАК ЗАВЕРШАТЬ РАБОТУ СЕРВЕРА (ГЛОБАЛЬНЫЙ ФЛАГ?)
 
         if (safeReadMsg(serverSocket, &connectInfo, &msg) < 0) { //тут мы получается ждем команду
-            logError("Проблемы с прослушиванием серверного сокета. Необходимо перезапустить сервер!\n");
+            fprintf(stdout,"Проблемы с прослушиванием серверного сокета. Необходимо перезапустить сервер!\n");
             close(serverSocket);
             exit(1);
         }
 
         if (msg.type != CODE_CONNECT) {
-            logDebug("Получили какой-то не тот пакет в основном потоке. Нам нужен пакет с id = 1.\n");
+            fprintf(stdout,"Получили какой-то не тот пакет в основном потоке. Нам нужен пакет с id = 1.\n");
             continue;
         }
 
@@ -75,13 +75,13 @@ int main(int argc, char** argv) {
         //И ТУТ ОПАСНОЕ МЕСТО С ПАМЯТЬЮ МОЖЕТ НЕ УСПЕТЬ СОЗДАТЬСЯ ПОТОК И УЖЕ ПОМЕНЯТЬСЯ ПАМЯТЬ
         workers = (pthread_t*) realloc(workers, sizeof(pthread_t) * (quantityWorkers + 1));
         if(pthread_create(&(workers[quantityWorkers]), NULL, asyncTask, (void*) &connectInfo)) {
-            logError("%s\n", "Не удалось создать поток для обработки задачи!");
+            fprintf(stdout,"%s\n", "Не удалось создать поток для обработки задачи!");
             continue;
         }
         quantityWorkers++;
     }
 
-    logInfo("Ожидаем завершения работы воркеров.\n");
+    fprintf(stdout,"Ожидаем завершения работы воркеров.\n");
     for (int i = 0; i < quantityWorkers; i++) {
         pthread_join(workers[i], NULL);
     }
@@ -89,7 +89,7 @@ int main(int argc, char** argv) {
     close(serverSocket);
     free(workers);
 
-    logInfo("%s\n", "Сервер завершил работу.");    
+    fprintf(stdout,"%s\n", "Сервер завершил работу.");    
     return 0;
 }
 
@@ -102,7 +102,7 @@ int main(int argc, char** argv) {
 */
 void initServerSocket(int *serverSocket, int port) {
     struct sockaddr_in servaddr;
-    logInfo("Инициализация сервера...\n");
+    fprintf(stdout,"Инициализация сервера...\n");
 
     /* Заполняем структуру для адреса сервера: семейство
     протоколов TCP/IP, сетевой интерфейс – любой, номер порта - 
@@ -116,7 +116,7 @@ void initServerSocket(int *serverSocket, int port) {
     
     *serverSocket = socket(AF_INET, SOCK_DGRAM, 0);
     if (*serverSocket < 0) {
-        logError(stderr, "%s\n", "Не удалось создать сокет!");
+        fprintf(stdout,"%s\n", "Не удалось создать сокет!");
         exit(1);
     }
 
@@ -127,12 +127,12 @@ void initServerSocket(int *serverSocket, int port) {
 
     int resBind = bind(*serverSocket, (struct sockaddr *) &servaddr, sizeof(servaddr));
     if (resBind < 0 ) {
-        logError("%s\n", "Не удалось выполнить присваивание имени сокету!");
+        fprintf(stdout,"%s\n", "Не удалось выполнить присваивание имени сокету!");
         close(serverSocket);
         exit(1);
     }
 
-    logInfo("%s\n", "Инициализация сервера прошла успешно.");
+    fprintf(stdout,"%s\n", "Инициализация сервера прошла успешно.");
 }
 
 /*
@@ -140,7 +140,7 @@ void initServerSocket(int *serverSocket, int port) {
 */
 unsigned short initServerSocketWithRandomPort(int *serverSocket) {
     struct sockaddr_in servaddr;
-    logInfo("Инициализация сокета на рандомном порту...\n");
+    fprintf(stdout,"Инициализация сокета на рандомном порту...\n");
 
     bzero(&servaddr, sizeof(servaddr));
     servaddr.sin_family = AF_INET;
@@ -148,18 +148,18 @@ unsigned short initServerSocketWithRandomPort(int *serverSocket) {
     
     *serverSocket = socket(AF_INET, SOCK_DGRAM, 0);
     if (*serverSocket < 0) {
-        logError(stderr, "%s\n", "Не удалось создать сокет на рандомном порту!");
+        fprintf(stdout,stderr, "%s\n", "Не удалось создать сокет на рандомном порту!");
         exit(1);
     }
 
     int resBind = bind(*serverSocket, (struct sockaddr *) &servaddr, sizeof(servaddr));
     if (resBind < 0 ) {
-        logError("%s\n", "Не удалось выполнить присваивание имени сокету на рандомном порту!");
+        fprintf(stdout,"%s\n", "Не удалось выполнить присваивание имени сокету на рандомном порту!");
         close(serverSocket);
         exit(1);
     }
 
-    logInfo("%s\n", "Инициализация сокета на рандомном порту прошла успешно.");
+    fprintf(stdout,"%s\n", "Инициализация сокета на рандомном порту прошла успешно.");
 
     return servaddr.sin_port;
 }
@@ -175,41 +175,41 @@ unsigned short initServerSocketWithRandomPort(int *serverSocket) {
 void* asyncTask(void* args) {
     struct sockaddr_in clientInfo = *((struct sockaddr_in*) args);
 
-    logDebug("Запущена задача клиента IP - %s  PORT - %d.\n", 
+    fprintf(stdout,"Запущена задача клиента IP - %s  PORT - %d.\n", 
         inet_ntoa(clientInfo.sin_addr), clientInfo.sin_port);
 
     int tempSocket = -1;
     unsigned short newPort = initServerSocketWithRandomPort(&tempSocket);
 
     if (safeSendMsg(tempSocket, clientInfo, CODE_CONNECT, &newPort, sizeof(newPort)) < 0) {
-        logError("Запущена задача клиента IP - %s  PORT - %d не выполнена!\n", 
+        fprintf(stdout,"Запущена задача клиента IP - %s  PORT - %d не выполнена!\n", 
             inet_ntoa(clientInfo.sin_addr), clientInfo.sin_port);
         return;
     }
 
-    logDebug("Соединение должно быть установилось.\n");
+    fprintf(stdout,"Соединение должно быть установилось.\n");
 
     bzero(&clientInfo, sizeof(clientInfo));
     struct Message msg;
 
     if (safeReadMsg(tempSocket, &clientInfo, &msg) < 0) {
-        logError("Не смогли считать команду от клиента в задаче!\n");
+        fprintf(stdout,"Не смогли считать команду от клиента в задаче!\n");
         return;
     }
 
     char errorString[SIZE_PACK_DATA] = { 0 };
     if (execClientCommand(socket, &clientInfo, &msg, errorString) == -1) {
-        logDebug("Ошибка обработки команды клиента!\n");
+        fprintf(stdout,"Ошибка обработки команды клиента!\n");
         
         if (safeSendMsg(tempSocket, clientInfo, CODE_ERROR, &errorString, sizeof(errorString)) < 0) {
-            logError("Не смогли отправить сообщение об ошибке!\n");
+            fprintf(stdout,"Не смогли отправить сообщение об ошибке!\n");
             return;
         }
     } else {
-        logDebug("Команда обработана!\n");
+        fprintf(stdout,"Команда обработана!\n");
 
         if (safeSendMsg(tempSocket, clientInfo, CODE_OK, "OK", 2) < 0) {
-            logError("Не смогли отправить сообщение усешной обработки команды!\n");
+            fprintf(stdout,"Не смогли отправить сообщение усешной обработки команды!\n");
             return;
         }
     }
@@ -219,15 +219,15 @@ int execClientCommand(const int socket, const struct sockaddr_in *clientInfo, co
     bzero(errorString, sizeof(errorString));
     
     if(parseCmd(msg, errorString) == -1){
-        logError("Не удалось распарсить команду клиента: %s\nОписание ошибки: %s\n", msg->data, errorString);
+        fprintf(stdout,"Не удалось распарсить команду клиента: %s\nОписание ошибки: %s\n", msg->data, errorString);
         return -1;
     }
     if(validateCommand(*msg, errorString) == -1){
-        logError("Команда клиента: %s - неккоретна!\nОписание ошибки: %s\n", msg->data, errorString);
+        fprintf(stdout,"Команда клиента: %s - неккоретна!\nОписание ошибки: %s\n", msg->data, errorString);
         return -1;
     }
 
-    logDebug("Команда клиента: %s - корректна.\n", msg->data);
+    fprintf(stdout,"Команда клиента: %s - корректна.\n", msg->data);
     
     
     if(!strcmp(msg->argv[0], "/ls")) {
@@ -239,7 +239,7 @@ int execClientCommand(const int socket, const struct sockaddr_in *clientInfo, co
     } else if(!strcmp(msg->argv[0], "/dload")){
         return sendFile(socket, clientInfo, msg->argv[1], errorString);
     } else {
-        logError("Хоть мы все и проверили, но что-то с ней не так: %s\n", msg->data);
+        fprintf(stdout,"Хоть мы все и проверили, но что-то с ней не так: %s\n", msg->data);
         return -1;
     }
 
@@ -253,7 +253,7 @@ int parseCmd(struct Message *msg, const char *errorString) {
     char *sep = " ";
     char *arg = strtok(msg->data, sep);
 
-    logDebug("Сари - %s\n", arg);
+    fprintf(stdout,"Сари - %s\n", arg);
     
     if(arg == NULL){
         sprintf(errorString, "Команда: %s - не поддается парсингу.\nВведите корректную команду. Используйте: help\n", msg->data);
@@ -334,7 +334,7 @@ int checkRegEx(const char *str, const char *mask) {
     regex_t preg;
     int err = regcomp (&preg, mask, REG_EXTENDED);
     if(err != 0){
-        logError("Не получилось скомпилировать регулярное выражение: %s\n", mask);
+        fprintf(stdout,"Не получилось скомпилировать регулярное выражение: %s\n", mask);
         return -1;
     }
     regmatch_t pm;
@@ -358,7 +358,7 @@ int sendListFilesInDir(const int socket, const struct sockaddr_in *clientInfo, c
 
     DIR *dir = opendir(fullPath);
     if (dir == NULL) {
-        logDebug("Не смог открыть директорию - %s\n", path);
+        fprintf(stdout,"Не смог открыть директорию - %s\n", path);
         sprintf(errorString, "Не удалось получить список файлов из директории - %s. Возможно она не существует.\n", path);
         return -1;
     }
@@ -370,14 +370,14 @@ int sendListFilesInDir(const int socket, const struct sockaddr_in *clientInfo, c
         }
         
         if (safeSendMsg(socket, *clientInfo, CODE_INFO, dirent->d_name, strlen(dirent->d_name)) == -1) {
-            logDebug("Проблема с отправкой имени файла из директории - %s\n", path);
+            fprintf(stdout,"Проблема с отправкой имени файла из директории - %s\n", path);
             sprintf(errorString, "Не получилось отправить навзание файла из директории - %s", path);
             return -1;
         }
     }
 
     if (closedir(fullPath) == -1) {
-        logDebug("Беда! Не могу закрыть директорию - %s\n", path);
+        fprintf(stdout,"Беда! Не могу закрыть директорию - %s\n", path);
         sprintf(errorString, "Проблемы с директорией! - %s", path);
         return -1;
     }
@@ -387,7 +387,7 @@ int sendListFilesInDir(const int socket, const struct sockaddr_in *clientInfo, c
 
 int changeClientDir(const int socket, const struct sockaddr_in *clientInfo, const char *path, const char *errorString) {
 
-    logDebug("Целевая директория - %s\n", path);
+    fprintf(stdout,"Целевая директория - %s\n", path);
 
     char fullPath[SIZE_MSG * 2] = { 0 };
     catWithRootDir(fullPath, path);
@@ -398,7 +398,7 @@ int changeClientDir(const int socket, const struct sockaddr_in *clientInfo, cons
     }
 
     if (safeSendMsg(socket, *clientInfo, CODE_WORK_DIR, path, strlen(path)) < 0) {
-        logError("Не смогли отправить путь.\n");
+        fprintf(stdout,"Не смогли отправить путь.\n");
     }
 
     return 1;
@@ -434,7 +434,7 @@ int readFile(const int socket, const struct sockaddr_in *clientInfo, const char 
 
     FILE *file = fopen(fullPath, "wb");
     if (file == NULL) {
-        logError("Не удалось открыть файл: %s - для записи!\n", fileName);
+        fprintf(stdout,"Не удалось открыть файл: %s - для записи!\n", fileName);
         sprintf(errorString, "Не удалось загрузить файл - %s.", fileName);
         return -1;
     }
@@ -444,7 +444,7 @@ int readFile(const int socket, const struct sockaddr_in *clientInfo, const char 
     for(;;){
         err = safeReadMsg(socket, clientInfo, &msg);
         if(err == -1){
-            logError("Не удалось принять кусок файла - %s. Данные не были сохранены.\n", fileName);
+            fprintf(stdout,"Не удалось принять кусок файла - %s. Данные не были сохранены.\n", fileName);
             sprintf(errorString, "Не удалось загрузить файл - %s.", fileName);
             fclose(file);
             remove(fileName);
@@ -452,13 +452,13 @@ int readFile(const int socket, const struct sockaddr_in *clientInfo, const char 
         }
 
         if (msg.type == CODE_FILE) {
-            logDebug("Пишу байт - %d\n", msg.length);
+            fprintf(stdout,"Пишу байт - %d\n", msg.length);
             fwrite(msg.data, sizeof(char), msg.length, file);
         } else if (msg.type == CODE_OK) {
-            logInfo("Файд принят.");
+            fprintf(stdout,"Файд принят.");
             break;
         } else {
-            logDebug("Пришло неправильное сообщение с кодом - %d.\n", msg.type);
+            fprintf(stdout,"Пришло неправильное сообщение с кодом - %d.\n", msg.type);
             sprintf(errorString, "Не удалось загрузить файл - %s.", fileName);
             fclose(file);
             remove(fileName);
@@ -485,7 +485,7 @@ int sendFile(const int socket, const struct sockaddr_in *clientInfo, const char 
 
     FILE *file = fopen(fullPath, "rb");
     if (file == NULL) {
-        logError("Не удалось открыть файл: %s - для записи!\n", fileName);
+        fprintf(stdout,"Не удалось открыть файл: %s - для записи!\n", fileName);
         sprintf(errorString, "Не удалось отправить файл - %s.", fileName);
         return -1;
     }
@@ -495,7 +495,7 @@ int sendFile(const int socket, const struct sockaddr_in *clientInfo, const char 
     while ((res = fread(section, sizeof(char), sizeof(section), file)) != 0) {
         err = safeSendMsg(socket, *clientInfo, CODE_FILE, section, res);
         if (err == -1) {
-            logError("Не удалось отправить кусок файла - %s\n", fileName);
+            fprintf(stdout,"Не удалось отправить кусок файла - %s\n", fileName);
             sprintf(errorString, "Не удалось отправить файл - %s\n", fileName);
             fclose(file);
             return -1;
