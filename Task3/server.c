@@ -10,11 +10,11 @@
 #include <regex.h>
 #include <dirent.h>
 #include <sys/stat.h>
-#include <stdarg.h>
+
 
 #include "declaration.h"
-#include "dexchange.h"
 #include "logger.h"
+#include "dexchange.h"
 
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 
@@ -62,7 +62,7 @@ int main(int argc, char** argv) {
             exit(1);
         }
 
-        if (msg.id != 1 && msg.code != CODE_CONNECT) {
+        if (msg.type != CODE_CONNECT) {
             logDebug("Получили какой-то не тот пакет в основном потоке. Нам нужен пакет с id = 1.\n");
             continue;
         }
@@ -356,7 +356,7 @@ int sendListFilesInDir(const int socket, const struct sockaddr_in *clientInfo, c
     char fullPath[SIZE_MSG * 2] = { 0 };
     catWithRootDir(fullPath, path);
 
-    DIR *dir = opendir(pafullPathth);
+    DIR *dir = opendir(fullPath);
     if (dir == NULL) {
         logDebug("Не смог открыть директорию - %s\n", path);
         sprintf(errorString, "Не удалось получить список файлов из директории - %s. Возможно она не существует.\n", path);
@@ -395,6 +395,10 @@ int changeClientDir(const int socket, const struct sockaddr_in *clientInfo, cons
     if(isWho(fullPath) != 2){
         sprintf(errorString, "%s - это не каталог! Или такого каталога не существует.", path);
         return -1;
+    }
+
+    if (safeSendMsg(socket, *clientInfo, CODE_WORK_DIR, path, strlen(path)) < 0) {
+        logError("Не смогли отправить путь.\n");
     }
 
     return 1;
@@ -450,6 +454,9 @@ int readFile(const int socket, const struct sockaddr_in *clientInfo, const char 
         if (msg.type == CODE_FILE) {
             logDebug("Пишу байт - %d\n", msg.length);
             fwrite(msg.data, sizeof(char), msg.length, file);
+        } else if (msg.type == CODE_OK) {
+            logInfo("Файд принят.");
+            break;
         } else {
             logDebug("Пришло неправильное сообщение с кодом - %d.\n", msg.type);
             sprintf(errorString, "Не удалось загрузить файл - %s.", fileName);
@@ -458,6 +465,7 @@ int readFile(const int socket, const struct sockaddr_in *clientInfo, const char 
             return -1;
         }
     }
+
     fclose(file);
     
     return 1;

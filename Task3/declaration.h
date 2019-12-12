@@ -15,6 +15,8 @@
 #define CODE_CONNECT 100
 #define CODE_CMD 101
 #define CODE_FILE 200
+#define CODE_LOAD_FILE 201
+#define CODE_DLOAD_FILE 202
 #define CODE_INFO 300
 #define CODE_WORK_DIR 301
 #define CODE_ERROR 400
