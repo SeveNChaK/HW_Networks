@@ -4,11 +4,13 @@
 #include <arpa/inet.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <errno.h>
 #include <unistd.h>
 #include <stdarg.h>
+#include <sys/stat.h>
+#include <sys/time.h>
 
-#include "logger.h"
 #include "declaration.h"
 #include "dexchange.h"
 
@@ -18,40 +20,52 @@ struct Path {
     char pathLine[SIZE_MSG];
 } workDir;
 
-strcut Path tempPath;
+struct Path tempPath;
 
 struct sockaddr_in serverInfo;
 char preDir[SIZE_MSG];
 
+void execCommand(const int sock, struct sockaddr_in *serverInfo);
+void parsePath(struct Path *pathStruct, const char *path);
+void makePathLine(const struct Path pathStruct, char *result);
+void loadFile(const int sock, struct sockaddr_in tempServerInfo, char *fileName);
+void downloadFile(const int sock, struct sockaddr_in *tempServerInfo, char *fileName);
+int isWho(char *path);
+
 int main(int argc, char **argv) {
 
     if(argc != 3){
-        logError("%s\n%s\n", "Неверное количество аргументов!", "Необходим вызов: ./client [IP] [PORT]");
+        fprintf(stdout,"%s\n%s\n", "Неверное количество аргументов!", "Необходим вызов: ./client [IP] [PORT]");
         exit(1);
     }
-    char *ip = (char *) argv[1];
-    int port = *((int*) argv[2]);
+    char *ip = (char*) argv[1];
+    int port = atoi(argv[2]);
 
     bzero(&serverInfo, sizeof(serverInfo));
     serverInfo.sin_family = AF_INET;
-    serverInfo.sin_addr.s_addr = inet_addr(ip); 
+    if (inet_aton(ip, serverInfo.sin_addr.s_addr) == 0){
+        fprintf(stderr, "0\n");
+        exit(1);
+    }
     serverInfo.sin_port = htons(port);
 
+    fprintf(stdout, "Создаю сокет...\n");
 
     int sock = -1;
     sock = socket(AF_INET, SOCK_DGRAM, 0);
     if (sock == -1) {
-        logError("Не удалось создать сокет! Приложение не запущено.\n");
+        fprintf(stdout,"Не удалось создать сокет! Приложение не запущено.\n");
         exit(1);
     }
 
     struct sockaddr_in myInfo;
     bzero(&myInfo, sizeof(myInfo));
-    serverInfo.sin_family = AF_INET;
-    serverInfo.sin_addr.s_addr = inet_addr(INADDR_ANY); 
+    myInfo.sin_family = AF_INET;
+    myInfo.sin_port = htons(0);
+    myInfo.sin_addr.s_addr = htonl(INADDR_ANY); 
 
-    if (bind(sock, (struct sockaddr*) &myInfo, sizeof(myInfo)) < 0) {
-        logError("Не удалось настроить адрес сокета! Приложение не запущено.\n");
+    if (bind(sock, (struct sockaddr_in*) &myInfo, sizeof(myInfo)) < 0) {
+        fprintf(stdout,"Не удалось настроить адрес сокета! Приложение не запущено.\n");
         close(sock);
         exit(1);
     }
@@ -63,80 +77,108 @@ int main(int argc, char **argv) {
     struct Message msg;
     char inputBuf[SIZE_MSG];
     for (;;) {
-        fprintf(stdout, "%s", preDir);
+        fprintf(stdout, "$");
+        fprintf(stdout, "%s", workDir.pathLine);
+        fprintf(stdout, ">\n");
+
         bzero(inputBuf, sizeof(inputBuf));
         fgets(inputBuf, sizeof(inputBuf), stdin);
         inputBuf[strlen(inputBuf) - 1] = '\0';
 
+        // fprintf(stderr, "stdin - %d\n", strlen(inputBuf));
+
         if (!strcmp("/quit", inputBuf)) {
             break;
-        }
-
-        if (safeSendMsg(sock, serverInfo, CODE_CONNECT, "CONNECT", strlen("CONNECT")) < 0){
-            logError("Проблемы с отправкой команды на сервер - 1! Попробуйте еще раз.\n");
-            continue;
-        }
-
-        if (safeReadMsg(sock, &tempServerInfo, &msg) < 0) {
-            logError("Проблемы с отправкой команды на сервер - 2! Попробуйте еще раз.\n");
-            continue;
         }
 
         char *sep = " ";
         char *arg = strtok(inputBuf, sep);
     
         if(arg == NULL){
-            logError("Дичь! Попробуйте еще раз.\n");
+            fprintf(stdout,"Дичь! Попробуйте еще раз.\n");
             continue;
         }
 
+        char tempStr[SIZE_MSG] = { 0 };
+
         if (strcmp(arg, "/load") == 0) {
             arg = strtok(NULL, sep);
+
+            if (arg == NULL) {
+                fprintf(stdout,"Не точное число параметров!\n");
+                continue;
+            }
+
             parsePath(&tempPath, arg);
 
-            char tempStr[SIZE_MSG] = { 0 };
             strcat(tempStr, "/load ");
             strcat(tempStr, workDir.pathLine);
             strcat(tempStr, "/");
-            strcat(tempStr, tempPath.argv[tempPath.argc - 1]);
-
-            if (safeSendMsg(sock, &tempServerInfo, CODE_CMD, tempStr, strlen(tempStr)) < 0) {
-                logError("Проблемы с отправкой команды на сервер - 3! Попробуйте еще раз.\n");
-                continue;
-            }
+            strcat(tempStr, tempPath.dirs[tempPath.argc - 1]);
         } else if (strcmp(arg, "/dload") == 0) {
             arg = strtok(NULL, sep);
-            char tempStr[SIZE_MSG] = { 0 };
+
+            if (arg == NULL) {
+                fprintf(stdout,"Не точное число параметров!\n");
+                continue;
+            }
+
+            parsePath(&tempPath, arg);
+
             strcat(tempStr, "/dload ");
             strcat(tempStr, workDir.pathLine);
+            strcat(tempStr, "/");
             strcat(tempStr, arg);
-
-            if (safeSendMsg(sock, &tempServerInfo, CODE_CMD, tempStr, strlen(tempStr)) < 0) {
-                logError("Проблемы с отправкой команды на сервер - 3! Попробуйте еще раз.\n");
-                continue;
-            }
         } else if (strcmp(arg, "/cd") == 0) {
             arg = strtok(NULL, sep);
-            char tempStr[SIZE_MSG] = { 0 };
 
-            memcpy(tempPath, workDir, sizeof(workDir));
-            if (tempPath.argc == 0) {
-                logInfo("Вы находитесь в корневой директории.");
+            if (arg == NULL) {
+                fprintf(stdout,"Не точное число параметров!\n");
                 continue;
             }
 
-            tempPath.argc--;
+            memcpy(&tempPath, &workDir, sizeof(workDir));
+            if (strcmp(arg, "..") == 0) {
+                if (tempPath.argc == 0) {
+                    fprintf(stdout,"Вы находитесь в корневой директории.\n");
+                    continue;
+                }
 
-            strcat(tempStr, "/cd ");
-            makePathLine(tempPath, tempStr);
+                tempPath.argc--;
 
-            if (safeSendMsg(sock, &tempServerInfo, CODE_CMD, tempStr, strlen(tempStr)) < 0) {
-                logError("Проблемы с отправкой команды на сервер - 3! Попробуйте еще раз.\n");
+                strcat(tempStr, "/cd ");
+                makePathLine(tempPath, tempStr);
+                strcat(tempStr, "/");
+            } else {
+                strcat(tempStr, "/cd ");
+                makePathLine(tempPath, tempStr);
+                strcat(tempStr, "/");
+                strcat(tempStr, arg);
+            }
+        } else if (strcmp(arg, "/ls") == 0){
+            strcat(tempStr, "/ls ");
+            strcat(tempStr, workDir.pathLine);
+            strcat(tempStr, "/");
+        }
+
+        if (safeSendMsg(sock, serverInfo, CODE_CONNECT, "CONNECT", strlen("CONNECT")) < 0){
+            fprintf(stdout,"Проблемы с отправкой команды на сервер - 1! Попробуйте еще раз.\n");
+            continue;
+        }
+
+        if (safeReadMsg(sock, &tempServerInfo, &msg) < 0) {
+            fprintf(stdout,"Проблемы с отправкой команды на сервер - 2! Попробуйте еще раз.\n");
+            continue;
+        }
+
+        if (strlen(tempStr) == 0) {
+            if (safeSendMsg(sock, tempServerInfo, CODE_CMD, inputBuf, strlen(inputBuf)) < 0) {
+                fprintf(stdout,"Проблемы с отправкой команды на сервер - 3! Попробуйте еще раз.\n");
                 continue;
             }
         } else {
-            if (safeSendMsg(sock, &tempServerInfo, CODE_CMD, inputBuf, strlen(inputBuf)) < 0) {
-                logError("Проблемы с отправкой команды на сервер - 3! Попробуйте еще раз.\n");
+            if (safeSendMsg(sock, tempServerInfo, CODE_CMD, tempStr, strlen(tempStr)) < 0) {
+                fprintf(stdout,"Проблемы с отправкой команды на сервер - 3! Попробуйте еще раз.\n");
                 continue;
             }
         }
@@ -144,39 +186,50 @@ int main(int argc, char **argv) {
         execCommand(sock, &tempServerInfo);
     }
 
-    close(sock;)
-    logInfo("Приложение завершило свою работу. До скорой встречи!\n");
+    close(sock);
+    fprintf(stdout,"Приложение завершило свою работу. До скорой встречи!\n");
 
     return 0;
 }
 
-void execCommand(const int sock, struct sockaddr_in *serverInfo, const struct Path path) {
+void makePathLine(const struct Path pathStruct, char *result) {
+    if (pathStruct.argc > 0) {
+        strcat(result, "/");
+    }
+    for (int i = 0; i < pathStruct.argc - 1; i++) {
+        strcat(result, pathStruct.dirs[i]);
+        strcat(result, "/");
+    }
+    strcat(result, pathStruct.dirs[pathStruct.argc - 1]);
+}
+
+void execCommand(const int sock, struct sockaddr_in *serverInfo) {
     struct Message msg;
     int code = -1;
 
     for (;;) {
         if(safeReadMsg(sock, serverInfo, &msg) < 0) {
-            logError("Проблемы с получением ответа от сервера! Попробуйте еще раз.\n");
+            fprintf(stdout,"Проблемы с получением ответа от сервера! Попробуйте еще раз.\n");
             return;
         }
 
-        code = msg.code;
+        code = msg.type;
 
         if (code == CODE_WORK_DIR) {
             parsePath(&workDir, msg.data);
         } else if (code == CODE_ERROR) {
-            logError("Возникла ошибка!\n%s\n", msg.data);
+            fprintf(stdout,"Возникла ошибка!\n%s\n", msg.data);
         } else if (code == CODE_INFO) {
-            logInfo("%s\n", msg.data);
+            fprintf(stdout,"%s\n", msg.data);
         } else if (code == CODE_LOAD_FILE) {
-            loadFile(sock, &tempServerInfo, tempPath.pathLine);
+            loadFile(sock, *serverInfo, tempPath.pathLine);
         } else if (code == CODE_DLOAD_FILE) {
-            downloadFile(sock, &tempServerInfo, path.argv[path.argc - 1]);
+            downloadFile(sock, serverInfo, tempPath.dirs[tempPath.argc - 1]);
             break;
         } else if (code == CODE_OK) {
             break;
         } else {
-            logError("Пришло что-то не то! Попробуйте еще раз.");
+            fprintf(stdout,"Пришло что-то не то! Попробуйте еще раз.");
         }
     }
 
@@ -184,63 +237,78 @@ void execCommand(const int sock, struct sockaddr_in *serverInfo, const struct Pa
 }
 
 void parsePath(struct Path *pathStruct, const char *path) {
+    fprintf(stderr, "Path - %s\n", path);
+    char sourcePath[SIZE_MSG] = {0};
+    memcpy(sourcePath, path, strlen(path));
+
+    if (strcmp(path, "/") == 0) {
+        // pathStruct->argc = 0;
+        bzero(pathStruct, sizeof(struct Path));
+        return;
+    }
+
     int countArg = 0;
     char *sep = "/";
     char *arg = strtok(path, sep);
 
     char dirs[MAX_QUANTITY_ARGS_CMD][SIZE_ARG];
 
-    logDebug("Сари - %s\n", arg);
+    fprintf(stdout,"Сари - %s\n", arg);
     
     if(arg == NULL){
-        logError("С путем что-то не так %s.", path);
+        fprintf(stdout,"С путем что-то не так %s.", path);
         return;
+    }
   
 
     while (arg != NULL && countArg <= MAX_QUANTITY_ARGS_CMD) {
         countArg ++;
         strcpy(dirs[countArg - 1], arg);
         arg = strtok(NULL, sep);
-        logDebug("Сари - %s\n", arg);
+        fprintf(stdout,"Сари - %s\n", arg);
     }
 
     if(countArg > MAX_QUANTITY_ARGS_CMD){
-        logError("Слишком много директорий в пути.\n", path);
+        fprintf(stdout,"Слишком много директорий в пути.\n", path);
         return;
     }
 
-    bzero(pathStruct, sizeof(pathStruct));
+    bzero(pathStruct, sizeof(struct Path));
     pathStruct->argc = countArg;
-    memcpy(pathStruct->argv, dirs, sizeof(dirs));
-    strcpy(pathStruct->pathLine, path);
+    memcpy(pathStruct->dirs, dirs, sizeof(dirs));
+    fprintf(stderr, "DO %s %s\n", pathStruct->pathLine, workDir.pathLine);
+    strcpy(pathStruct->pathLine, sourcePath);
+    fprintf(stderr, "POSLE %s %s\n", pathStruct->pathLine, workDir.pathLine);
+
+    fprintf(stderr, "aga %s\n", path);
 }
 
-void makePathLine(const struct Path pathStruct, char *result) {
-    bzero(result, sizeof(result));
-    strcat(result, "/");
-    for (int i = 0; i < pathStruct.argc - 1; i++) {
-        strcat(result, pathStruct.argv[i]);
-        strcat(result, "/");
+int isWho(char *path) {
+    struct stat statBuf;
+    if(stat(path, &statBuf) == -1){
+        return -1;
     }
-    strcat(result, pathStruct.argv[pathStruct.argc - 1]);
+    if(S_ISREG(statBuf.st_mode)){
+      return 1;
+    }else if(S_ISDIR(statBuf.st_mode)){
+      return 2;
+    }else if(S_ISLNK(statBuf.st_mode)){
+      return 1;
+    } else {
+        return -1;
+    }
 }
 
-/**
-Отправка файла серверу.
-Входные значения:
-    int sock - соединение с сервером;
-    char *fileName - путь к файлу на стороне клиента.
-*/
-void loadFile(const int sock, struct sockaddr_in tempServerInfo, char *fileName){
+void loadFile(const int sock, struct sockaddr_in tempServerInfo, char *fileName) {
     if (isWho(fileName) != 1) {
-        logError("%s - это не файл!", fileName);
+        fprintf(stdout,"%s - это не файл!", fileName);
         safeSendMsg(sock, tempServerInfo, CODE_ERROR, "Отмена.", strlen("Отмена."));
         return;
     }
 
     FILE *file = fopen(fileName, "rb");
     if(file == NULL){
-        logError("Не удалось загрузить файл - %s\n", fileName);
+        fprintf(stdout,"Не удалось загрузить файл - %s\n", fileName);
         safeSendMsg(sock, tempServerInfo, CODE_ERROR, "Отмена.", strlen("Отмена."));
         return;
     }
@@ -248,10 +316,10 @@ void loadFile(const int sock, struct sockaddr_in tempServerInfo, char *fileName)
     char section[SIZE_MSG] = {'\0'};
     int res = 0, err;
     while ((res = fread(section, sizeof(char), sizeof(section), file)) != 0) {
-        logDebug("res = %d\n", res);
+        fprintf(stdout,"res = %d\n", res);
         err = safeSendMsg(sock, tempServerInfo, CODE_FILE, section, res);
         if(err == -1){
-            logError("Не удалось отправить файл - %s\n", fileName);
+            fprintf(stdout,"Не удалось отправить файл - %s\n", fileName);
             fclose(file);
             return;
         }
@@ -262,14 +330,14 @@ void loadFile(const int sock, struct sockaddr_in tempServerInfo, char *fileName)
 
     err = safeSendMsg(sock, tempServerInfo, CODE_OK, "OK", 2);
     if(err == -1){
-        logError("Не удалось отправить подтверждение...");
+        fprintf(stdout,"Не удалось отправить подтверждение...");
     }
 }
 
 void downloadFile(const int sock, struct sockaddr_in *tempServerInfo, char *fileName) {
     FILE *file = fopen(fileName, "wb");
     if(file == NULL){
-        logError("Не удалось скачать файл - %s\n", fileName);
+        fprintf(stdout,"Не удалось скачать файл - %s\n", fileName);
         safeSendMsg(sock, *tempServerInfo, CODE_ERROR, "Отмена", strlen("Отмена"));
         return;
     }
@@ -279,19 +347,19 @@ void downloadFile(const int sock, struct sockaddr_in *tempServerInfo, char *file
     for(;;){
         err = safeReadMsg(sock, tempServerInfo, &msg);
         if(err == -1){
-            logError("Не удалось принять кусок файла - %s. Данные не были сохранены.\n", fileName);
+            fprintf(stdout,"Не удалось принять кусок файла - %s. Данные не были сохранены.\n", fileName);
             fclose(file);
             remove(fileName);
             return;
         }
 
-        if(package.code == CODE_FILE){
-            fwrite(msg.data, sizeof(char), msg.sizeData, file);
-        } else if(package.code == CODE_OK){
-            logInfo("Файл: %s - скачан.\n", fileName);
+        if(msg.type == CODE_FILE){
+            fwrite(msg.data, sizeof(char), msg.length, file);
+        } else if(msg.type == CODE_OK){
+            fprintf(stdout,"Файл: %s - скачан.\n", fileName);
             break;
         } else {
-            logError("Не удалось принять кусок файла - %s. Данные не были сохранены.\n", fileName);
+            fprintf(stdout,"Не удалось принять кусок файла - %s. Данные не были сохранены.\n", fileName);
             fclose(file);
             remove(fileName);
             return;

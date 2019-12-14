@@ -10,41 +10,34 @@
 #include <regex.h>
 #include <dirent.h>
 #include <sys/stat.h>
-
+#include <sys/time.h>
 
 #include "declaration.h"
-#include "logger.h"
 #include "dexchange.h"
 
-pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+void initServerSocket(int *serverSocket, int port);
+void initServerSocketWithRandomPort(int *serverSocket);
+void* asyncTask(void* args);
+int execClientCommand(const int socket, struct sockaddr_in *clientInfo, const struct Message *msg, char *errorString);
+int parseCmd(struct Message *msg, char *errorString);
+int validateCommand(const struct Message msg, char *errorString);
+int checkRegEx(const char *str, const char *mask);
+int sendListFilesInDir(const int socket, struct sockaddr_in *clientInfo, const char *path, char *errorString);
+int changeClientDir(const int socket, struct sockaddr_in *clientInfo, const char *path, char *errorString);
+int readFile(const int socket, struct sockaddr_in *client, const char *fileName, char *errorString);
+int sendFile(const int socket, struct sockaddr_in *client, const char *fileName, char *errorString);
 
-struct Path{
-    int count;
-    char dirs[MAX_QUANTITY_ARGS_CMD][SIZE_ARG];
-};
 
 char *rootDir;
-
-void initServerSocket(int *serverSocket, int port);
-unsigned short initServerSocketWithRandomPort(int *serverSocket);
-void* asyncTask(void* args);
-int execClientCommand(const int socket, const struct sockaddr_in *clientInfo, const struct Message *msg, const char *errorString);
-int parseCmd(struct Message *msg, const char *errorString);
-int validateCommand(const struct Message msg, const char *errorString);
-int checkRegEx(const char *str, const char *mask);
-int sendListFilesInDir(const int socket, const struct sockaddr_in *clientInfo, const char *path, char *errorString);
-int changeClientDir(const int socket, const struct sockaddr_in *clientInfo, const char *path, const char *errorString);
-int readFile(const int socket, const struct sockaddr_in *client, const char *fileName, const char *errorString);
-int sendFile(const int socket, const struct sockaddr_in *client, const char *fileName, char *errorString);
 
 int main(int argc, char** argv) {
 
     if(argc != 3){
-        fprintf(stdout,"%s\n%s\n", "Неверное количество аргументов!", "Необходим вызов: ./server [PORT] [WORK_PATH]");
+        fprintf(stdout,"%s\n%s\n", "Неверное количество аргументов!", "Необходим вызов: ./server [PORT] [FULL_WORK_PATH]");
         exit(1);
     }
 
-    int port = *((int*) argv[1]);
+    int port = atoi(argv[1]);
     rootDir = argv[2];
     int serverSocket = -1;
     initServerSocket(&serverSocket, port);
@@ -56,10 +49,10 @@ int main(int argc, char** argv) {
     struct Message msg;
     while (1) { //ПРИДУМАТЬ КАК ЗАВЕРШАТЬ РАБОТУ СЕРВЕРА (ГЛОБАЛЬНЫЙ ФЛАГ?)
 
-        if (safeReadMsg(serverSocket, &connectInfo, &msg) < 0) { //тут мы получается ждем команду
+        if (safeSourceReadMsg(serverSocket, &connectInfo, &msg) < 0) { //тут мы получается ждем команду
             fprintf(stdout,"Проблемы с прослушиванием серверного сокета. Необходимо перезапустить сервер!\n");
-            close(serverSocket);
-            exit(1);
+            close(serverSocket); //ФИКСИТЬ ОШИБКУ КОГДА ПОЯВЯТЬСЯ ТАЙМАУТЫ
+            break;
         }
 
         if (msg.type != CODE_CONNECT) {
@@ -73,8 +66,13 @@ int main(int argc, char** argv) {
         */
         //СДЕЛАТЬ ПОИСК ВОРКЕРОВ!!!!ОБЯЗАТЕЛЬНО!!!!
         //И ТУТ ОПАСНОЕ МЕСТО С ПАМЯТЬЮ МОЖЕТ НЕ УСПЕТЬ СОЗДАТЬСЯ ПОТОК И УЖЕ ПОМЕНЯТЬСЯ ПАМЯТЬ
+
+        struct sockaddr_in tempInfo;
+        bzero(&tempInfo, sizeof(struct sockaddr_in));
+        memcpy(&tempInfo, &connectInfo, sizeof(struct sockaddr_in));
+
         workers = (pthread_t*) realloc(workers, sizeof(pthread_t) * (quantityWorkers + 1));
-        if(pthread_create(&(workers[quantityWorkers]), NULL, asyncTask, (void*) &connectInfo)) {
+        if(pthread_create(&(workers[quantityWorkers]), NULL, asyncTask, (void*) &tempInfo)) {
             fprintf(stdout,"%s\n", "Не удалось создать поток для обработки задачи!");
             continue;
         }
@@ -112,7 +110,7 @@ void initServerSocket(int *serverSocket, int port) {
     bzero(&servaddr, sizeof(servaddr));
     servaddr.sin_family = AF_INET;
     servaddr.sin_port = htons(port);
-    servaddr.sin_addr.s_addr = htonl(INADDR_ANY);
+    servaddr.sin_addr.s_addr = inet_addr("127.0.0.1");
     
     *serverSocket = socket(AF_INET, SOCK_DGRAM, 0);
     if (*serverSocket < 0) {
@@ -138,7 +136,7 @@ void initServerSocket(int *serverSocket, int port) {
 /*
 Создает сокет на рандомном порту.
 */
-unsigned short initServerSocketWithRandomPort(int *serverSocket) {
+void initServerSocketWithRandomPort(int *serverSocket) {
     struct sockaddr_in servaddr;
     fprintf(stdout,"Инициализация сокета на рандомном порту...\n");
 
@@ -160,8 +158,6 @@ unsigned short initServerSocketWithRandomPort(int *serverSocket) {
     }
 
     fprintf(stdout,"%s\n", "Инициализация сокета на рандомном порту прошла успешно.");
-
-    return servaddr.sin_port;
 }
 
 /**
@@ -175,54 +171,56 @@ unsigned short initServerSocketWithRandomPort(int *serverSocket) {
 void* asyncTask(void* args) {
     struct sockaddr_in clientInfo = *((struct sockaddr_in*) args);
 
-    fprintf(stdout,"Запущена задача клиента IP - %s  PORT - %d.\n", 
-        inet_ntoa(clientInfo.sin_addr), clientInfo.sin_port);
+    fprintf(stdout,"Запущена задача клиента IP - %s  PORT - %d.\n", inet_ntoa(clientInfo.sin_addr), clientInfo.sin_port);
 
     int tempSocket = -1;
-    unsigned short newPort = initServerSocketWithRandomPort(&tempSocket);
+    initServerSocketWithRandomPort(&tempSocket);
 
-    if (safeSendMsg(tempSocket, clientInfo, CODE_CONNECT, &newPort, sizeof(newPort)) < 0) {
-        fprintf(stdout,"Запущена задача клиента IP - %s  PORT - %d не выполнена!\n", 
-            inet_ntoa(clientInfo.sin_addr), clientInfo.sin_port);
+    if (safeSendMsg(tempSocket, clientInfo, CODE_CONNECT, "CONNECT_OK", strlen("CONNECT_OK")) < 0) {
+        fprintf(stdout,"Запущена задача клиента IP - %s  PORT - %d не выполнена!\n", inet_ntoa(clientInfo.sin_addr), clientInfo.sin_port);
+        close(tempSocket);
         return;
     }
 
     fprintf(stdout,"Соединение должно быть установилось.\n");
 
-    bzero(&clientInfo, sizeof(clientInfo));
     struct Message msg;
-
     if (safeReadMsg(tempSocket, &clientInfo, &msg) < 0) {
         fprintf(stdout,"Не смогли считать команду от клиента в задаче!\n");
+        close(tempSocket);
         return;
     }
 
     char errorString[SIZE_PACK_DATA] = { 0 };
-    if (execClientCommand(socket, &clientInfo, &msg, errorString) == -1) {
+    if (execClientCommand(tempSocket, &clientInfo, &msg, errorString) == -1) {
         fprintf(stdout,"Ошибка обработки команды клиента!\n");
         
         if (safeSendMsg(tempSocket, clientInfo, CODE_ERROR, &errorString, sizeof(errorString)) < 0) {
             fprintf(stdout,"Не смогли отправить сообщение об ошибке!\n");
-            return;
-        }
-    } else {
-        fprintf(stdout,"Команда обработана!\n");
-
-        if (safeSendMsg(tempSocket, clientInfo, CODE_OK, "OK", 2) < 0) {
-            fprintf(stdout,"Не смогли отправить сообщение усешной обработки команды!\n");
+            close(tempSocket);
             return;
         }
     }
+
+    if (safeSendMsg(tempSocket, clientInfo, CODE_OK, "OK", 2) < 0) {
+        fprintf(stdout,"Не смогли отправить сообщение усешной обработки команды!\n");
+        close(tempSocket);
+        return;
+    }
+
+    close(tempSocket);
+
+    fprintf(stdout,"Команда обработана! Сокет закрыт, воркер завершил работу.\n");
 }
 
-int execClientCommand(const int socket, const struct sockaddr_in *clientInfo, const struct Message *msg, const char *errorString) {
+int execClientCommand(const int socket, struct sockaddr_in *clientInfo, const struct Message *msg, char *errorString) {
     bzero(errorString, sizeof(errorString));
     
-    if(parseCmd(msg, errorString) == -1){
+    if (parseCmd(msg, errorString) == -1) {
         fprintf(stdout,"Не удалось распарсить команду клиента: %s\nОписание ошибки: %s\n", msg->data, errorString);
         return -1;
     }
-    if(validateCommand(*msg, errorString) == -1){
+    if (validateCommand(*msg, errorString) == -1) {
         fprintf(stdout,"Команда клиента: %s - неккоретна!\nОписание ошибки: %s\n", msg->data, errorString);
         return -1;
     }
@@ -230,13 +228,13 @@ int execClientCommand(const int socket, const struct sockaddr_in *clientInfo, co
     fprintf(stdout,"Команда клиента: %s - корректна.\n", msg->data);
     
     
-    if(!strcmp(msg->argv[0], "/ls")) {
+    if (!strcmp(msg->argv[0], "/ls")) {
         return sendListFilesInDir(socket, clientInfo, msg->argv[1], errorString);
-    } else if(!strcmp(msg->argv[0], "/cd")) {
+    } else if (!strcmp(msg->argv[0], "/cd")) {
         return changeClientDir(socket, clientInfo, msg->argv[1], errorString);
-    } else if(!strcmp(msg->argv[0], "/load")) {
+    } else if (!strcmp(msg->argv[0], "/load")) {
         return readFile(socket, clientInfo, msg->argv[1], errorString);
-    } else if(!strcmp(msg->argv[0], "/dload")){
+    } else if (!strcmp(msg->argv[0], "/dload")) {
         return sendFile(socket, clientInfo, msg->argv[1], errorString);
     } else {
         fprintf(stdout,"Хоть мы все и проверили, но что-то с ней не так: %s\n", msg->data);
@@ -246,7 +244,7 @@ int execClientCommand(const int socket, const struct sockaddr_in *clientInfo, co
     return 1;
 }
 
-int parseCmd(struct Message *msg, const char *errorString) {
+int parseCmd(struct Message *msg, char *errorString) {
     bzero(errorString, sizeof(errorString));
 
     int countArg = 0;
@@ -276,7 +274,7 @@ int parseCmd(struct Message *msg, const char *errorString) {
     return 1;
 }
 
-int validateCommand(const struct Message msg, const char *errorString) {
+int validateCommand(const struct Message msg, char *errorString) {
     bzero(errorString, sizeof(errorString));
 
     int argc = msg.argc;
@@ -301,25 +299,6 @@ int validateCommand(const struct Message msg, const char *errorString) {
     } else if (!strcmp(firstArg, "/dload")) {
         if (argc != 2) {
             sprintf(errorString, "Команда: %s - имеет много или мало аргументов. Воспользуейтесь командой: help\n", msg.data);
-            return -1;
-        }
-    } else if (!strcmp(firstArg, "/kick")) {
-        if (argc != 2) {
-            sprintf(errorString, "Команда: %s - имеет много или мало аргументов. Воспользуейтесь командой: help\n", msg.data);
-            return -1;
-        }
-
-        int err = checkRegEx(msg.argv[1], "^[0-9]+$");
-        if (err == -1) {
-            sprintf(errorString, "С командой: %s - что-то не так. Воспользуейтесь командой: /help\n", msg.data);
-            return -1;
-        } else if (err == -2) {
-            sprintf(errorString, "Команда: %s - имеет некорретные аргументы. Воспользуейтесь командой: /help\n", msg.data);
-            return -1;
-        }
-    } else if(!strcmp(firstArg, "/shutdown")){
-        if(argc!= 1){
-            sprintf(errorString, "Команда: %s - имеет лишние аргументы! Воспользуейтесь командой: /help\n", cmdLine);
             return -1;
         }
     } else {
@@ -348,10 +327,11 @@ int checkRegEx(const char *str, const char *mask) {
 void catWithRootDir(char *fullPath, const char *path) {
     strcat(fullPath, rootDir);
     strcat(fullPath, path);
+    // strcat(fullPath, "/");
 }
 
-int sendListFilesInDir(const int socket, const struct sockaddr_in *clientInfo, const char *path, char *errorString) {
-    bzero(errorString,sizeof(errorString));
+int sendListFilesInDir(const int socket, struct sockaddr_in *clientInfo, const char *path, char *errorString) {
+    bzero(errorString, sizeof(errorString));
 
     char fullPath[SIZE_MSG * 2] = { 0 };
     catWithRootDir(fullPath, path);
@@ -376,7 +356,7 @@ int sendListFilesInDir(const int socket, const struct sockaddr_in *clientInfo, c
         }
     }
 
-    if (closedir(fullPath) == -1) {
+    if (closedir(dir) == -1) {
         fprintf(stdout,"Беда! Не могу закрыть директорию - %s\n", path);
         sprintf(errorString, "Проблемы с директорией! - %s", path);
         return -1;
@@ -385,12 +365,14 @@ int sendListFilesInDir(const int socket, const struct sockaddr_in *clientInfo, c
     return 1;
 }
 
-int changeClientDir(const int socket, const struct sockaddr_in *clientInfo, const char *path, const char *errorString) {
+int changeClientDir(const int socket, struct sockaddr_in *clientInfo, const char *path, char *errorString) {
 
     fprintf(stdout,"Целевая директория - %s\n", path);
 
     char fullPath[SIZE_MSG * 2] = { 0 };
     catWithRootDir(fullPath, path);
+
+    fprintf(stdout,"Полный путь - %s\n", fullPath);
 
     if(isWho(fullPath) != 2){
         sprintf(errorString, "%s - это не каталог! Или такого каталога не существует.", path);
@@ -427,7 +409,14 @@ int isWho(char *path){
     }
 }
 
-int readFile(const int socket, const struct sockaddr_in *clientInfo, const char *fileName, const char *errorString) {
+
+//Путь пользователя на сервере + имя файла
+int readFile(const int socket, struct sockaddr_in *clientInfo, const char *fileName, char *errorString) {
+
+    if (safeSendMsg(socket, *clientInfo, CODE_LOAD_FILE, "Д", 1) < 0) {
+        fprintf(stdout,"code load error");
+        return -1;
+    }
 
     char fullPath[SIZE_MSG * 2] = { 0 };
     catWithRootDir(fullPath, fileName);
@@ -455,7 +444,7 @@ int readFile(const int socket, const struct sockaddr_in *clientInfo, const char 
             fprintf(stdout,"Пишу байт - %d\n", msg.length);
             fwrite(msg.data, sizeof(char), msg.length, file);
         } else if (msg.type == CODE_OK) {
-            fprintf(stdout,"Файд принят.");
+            fprintf(stdout,"Файл принят.\n");
             break;
         } else {
             fprintf(stdout,"Пришло неправильное сообщение с кодом - %d.\n", msg.type);
@@ -471,10 +460,18 @@ int readFile(const int socket, const struct sockaddr_in *clientInfo, const char 
     return 1;
 }
 
-int sendFile(const int socket, const struct sockaddr_in *clientInfo, const char *fileName, char *errorString) {
+//Путь пользователя на сервере + имя файла
+int sendFile(const int socket, struct sockaddr_in *clientInfo, const char *fileName, char *errorString) {
+
+    if (safeSendMsg(socket, *clientInfo, CODE_DLOAD_FILE, "Д", 1) < 0) {
+        fprintf(stdout,"code dload error");
+        return -1;
+    }
 
     char fullPath[SIZE_MSG * 2] = { 0 };
     catWithRootDir(fullPath, fileName);
+
+    fprintf(stdout,"Полный путь отправка - %s\n", fullPath);
 
     if (isWho(fullPath) != 1) {
         sprintf(errorString, "%s - это не файл!", fileName);
@@ -490,10 +487,14 @@ int sendFile(const int socket, const struct sockaddr_in *clientInfo, const char 
         return -1;
     }
 
+    // FILE *fileTest = fopen("test", "wb");
+
     char section[SIZE_MSG] = {'\0'};
     int res = 0, err;
     while ((res = fread(section, sizeof(char), sizeof(section), file)) != 0) {
+        // fwrite(section, sizeof(char), res, fileTest);
         err = safeSendMsg(socket, *clientInfo, CODE_FILE, section, res);
+        fprintf(stderr, "res - %d\n", res);
         if (err == -1) {
             fprintf(stdout,"Не удалось отправить кусок файла - %s\n", fileName);
             sprintf(errorString, "Не удалось отправить файл - %s\n", fileName);
@@ -504,6 +505,7 @@ int sendFile(const int socket, const struct sockaddr_in *clientInfo, const char 
     }
 
     fclose(file);
+    // fclose(fileTest);
     
     return 1;
 }
