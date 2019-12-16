@@ -207,6 +207,7 @@ void execCommand(const int sock, struct sockaddr_in *serverInfo) {
     struct Message msg;
     int code = -1;
 
+    int wrongQuantity = 10;
     for (;;) {
         if(safeReadMsg(sock, serverInfo, &msg) < 0) {
             fprintf(stdout,"Проблемы с получением ответа от сервера! Попробуйте еще раз.\n");
@@ -230,6 +231,11 @@ void execCommand(const int sock, struct sockaddr_in *serverInfo) {
             break;
         } else {
             fprintf(stdout,"Пришло что-то не то! Попробуйте еще раз.");
+
+            if (--wrongQuantity == 0) {
+                fprintf(stdout,"Получено много неверных пакетов. Предположительно что-то не так с сетью. Сообщение не получено.\n");
+                break;
+            }
         }
     }
 

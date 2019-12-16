@@ -1,7 +1,7 @@
 #ifndef DEXCHANGE_H
 #define DEXCHANGE_H
 
-#define QUANTITY_TRY 10
+#define QUANTITY_TRY 2
 
 int safeSourceReadMsg(const int socket, struct sockaddr_in *clientInfo, struct Message *msg) {
 	bzero(clientInfo, sizeof(struct sockaddr_in));
@@ -235,7 +235,7 @@ int safeSendMsg(const int socket,
 		if (currentPackage.id != sendedPacks + 1) { //Проверка на то, что отправляем - старый или новый пакет
 			bzero(&currentPackage, sizeof(struct Package));
 			currentPackage.ack = NO_ACK;
-			currentPackage.id = sendedPacks + 1;
+			currentPackage.id = sendedPacks + 3;
 			currentPackage.maxId = quantityPacks;
 			currentPackage.code = code;
 			if (currentPackage.id != quantityPacks) {
@@ -252,6 +252,11 @@ int safeSendMsg(const int socket,
 				fprintf(stderr, "R22 - %c\n", msg[0]);
 			}
 			fprintf(stderr, "MSG :%s\n", currentPackage.data);
+		} else {
+			if (--quantityTry == 0) {
+				fprintf(stdout,"Слишком много попыток без подтверждения. Возможно проблемы с сетью. Сообщение не отправлено.\n");
+				return -1;				
+			}
 		}
 
 		if (sendPack(socket, clientInfo, currentPackage) < 0) {
@@ -320,8 +325,8 @@ int readPack(const int socket, struct sockaddr_in *clientInfo, struct Package *p
 		return -1;
 	}
 
-	fprintf(stdout,"Получен пакет на сокете %d:\n  ID - %d\n  MAX_ID - %d\n  CODE - %d\n  DATA - %s\n", 
-		socket, package->id, package->maxId, package->code, package->data);
+	fprintf(stdout,"Получен пакет на сокете %d:ACC - %d  \n  ID - %d\n  MAX_ID - %d\n  CODE - %d\n  DATA - %s\n", 
+		socket, package->ack, package->id, package->maxId, package->code, package->data);
 
 	return result;
 }
